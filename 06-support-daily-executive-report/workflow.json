@@ -1,0 +1,308 @@
+{
+  "name": "AI Support — Daily Executive Report",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7
+            }
+          ]
+        }
+      },
+      "id": "8c9aea6c-37bd-47ae-a291-68f47a65f164",
+      "name": "Every Morning 07:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "notes": "Daily cadence for the executive report. Cadence is driven by the schedule, not by a weekday check."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, customer_id, channel, category, intent, sentiment, urgency,\n       ai_confidence, escalation_status, resolution_status, response_time_ms, created_at\nFROM conversations\nWHERE created_at >= ((date_trunc('day', now() AT TIME ZONE $1) - INTERVAL '1 day') AT TIME ZONE $1)\n  AND created_at <  (date_trunc('day', now() AT TIME ZONE $1) AT TIME ZONE $1)\nORDER BY created_at ASC;",
+        "options": {
+          "queryReplacement": "={{ [$now.zoneName] }}"
+        }
+      },
+      "id": "ec84c8d0-43c5-4dba-8596-cdec420ef412",
+      "name": "Fetch Yesterday Conversations",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR postgres credential"
+        }
+      },
+      "notes": "Step 11 — reads the full previous-day dataset back from PostgreSQL. alwaysOutputData keeps the report running (with zeros) even on a quiet day."
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map((i) => i.json).filter((j) => j && Object.keys(j).length > 0 && j.id !== undefined);\nconst total = rows.length;\nconst escalations = rows.filter((r) => r.escalation_status === \"escalated\").length;\nconst aiResolved = rows.filter((r) => r.resolution_status === \"resolved\").length;\nconst resolutionRate = total ? Math.round((aiResolved / total) * 1000) / 10 : 0;\nconst escalationRate = total ? Math.round((escalations / total) * 1000) / 10 : 0;\n\nconst avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);\nconst respTimes = rows.map((r) => Number(r.response_time_ms) || 0).filter((n) => n > 0);\nconst avgResponseMs = Math.round(avg(respTimes));\nconst confidences = rows.map((r) => Number(r.ai_confidence) || 0).filter((n) => n > 0);\nconst avgConfidence = Math.round(avg(confidences) * 10) / 10;\n\nconst tally = (key) => {\n  const out = {};\n  for (const r of rows) { const k = r[key] || \"unknown\"; out[k] = (out[k] || 0) + 1; }\n  return out;\n};\nconst sentiment = tally(\"sentiment\");\nconst channels = tally(\"channel\");\nconst categories = tally(\"category\");\nconst topTopics = Object.keys(categories)\n  .map((k) => ({ topic: k, count: categories[k] }))\n  .sort((a, b) => b.count - a.count)\n  .slice(0, 5);\n\nconst reportDate = $now.minus({ days: 1 }).toFormat('yyyy-MM-dd');\nreturn [{ json: {\n  report_date: reportDate,\n  total_conversations: total,\n  has_data: total > 0,\n  ai_resolution_rate: resolutionRate,\n  human_escalations: escalations,\n  escalation_rate: escalationRate,\n  avg_response_time_ms: avgResponseMs,\n  avg_response_time_readable: (avgResponseMs / 1000).toFixed(1) + \"s\",\n  avg_ai_confidence: avgConfidence,\n  sentiment_breakdown: sentiment,\n  channel_usage: channels,\n  most_common_topics: topTopics,\n} }];"
+      },
+      "id": "70f88603-0856-401e-bd89-0611110793a1",
+      "name": "Compute Analytics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "notes": "Step 11 — aggregates the day's rows into the dashboard metrics (totals, resolution/escalation rates, avg response time, sentiment, channels, top topics, avg confidence)."
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Produce an executive daily customer-support report from these metrics (JSON):\n\n{{ JSON.stringify($json) }}\n\nInclude: support summary, most asked questions, escalation rate commentary, customer satisfaction trend, and operational recommendations.",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are a customer-support operations analyst writing a concise, professional executive report for management. Base every statement on the provided metrics. Be specific and actionable."
+        }
+      },
+      "id": "9be466a8-bb1d-4694-8672-88b6ecd6ee4a",
+      "name": "Generate Executive Report",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        912,
+        0
+      ],
+      "executeOnce": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "notes": "Step 12 — turns the day's metrics into an executive narrative report."
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\",\"description\":\"Executive support summary paragraph\"},\"most_asked_questions\":{\"type\":\"string\",\"description\":\"The most asked questions / topics of the day\"},\"satisfaction_trend\":{\"type\":\"string\",\"description\":\"Customer satisfaction / sentiment trend commentary\"},\"recommendations\":{\"type\":\"string\",\"description\":\"Operational recommendations for management\"}},\"required\":[\"summary\",\"most_asked_questions\",\"satisfaction_trend\",\"recommendations\"],\"additionalProperties\":false}"
+      },
+      "id": "513fe355-33af-4164-8e14-a39b5da0da0e",
+      "name": "Report Schema",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1056,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "you@example.com",
+        "subject": "=Daily Support Report — {{ $('Compute Analytics').item.json.report_date }}",
+        "message": "=<h2>Daily Customer Support Report</h2><p><b>Date:</b> {{ $('Compute Analytics').item.json.report_date }}</p><h3>Key Metrics</h3><ul><li><b>Total conversations:</b> {{ $('Compute Analytics').item.json.total_conversations }}</li><li><b>AI resolution rate:</b> {{ $('Compute Analytics').item.json.ai_resolution_rate }}%</li><li><b>Human escalations:</b> {{ $('Compute Analytics').item.json.human_escalations }} ({{ $('Compute Analytics').item.json.escalation_rate }}%)</li><li><b>Avg response time:</b> {{ $('Compute Analytics').item.json.avg_response_time_readable }}</li><li><b>Avg AI confidence:</b> {{ $('Compute Analytics').item.json.avg_ai_confidence }}</li></ul><h3>Executive Summary</h3><p>{{ $json.output.summary }}</p><h3>Most Asked Questions</h3><p>{{ $json.output.most_asked_questions }}</p><h3>Customer Satisfaction Trend</h3><p>{{ $json.output.satisfaction_trend }}</p><h3>Operational Recommendations</h3><p>{{ $json.output.recommendations }}</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "e02f0ea5-1077-44c4-8d80-14b364ade940",
+      "name": "Email Report to Management",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1264,
+        0
+      ],
+      "executeOnce": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR gmailOAuth2 credential"
+        }
+      },
+      "notes": "Step 12 — emails the executive report to management."
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        896,
+        240
+      ],
+      "id": "628cd762-3f37-41c7-94fb-5d96e653c2d0",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googlePalmApi credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b55150da-1469-4559-be50-f5c01ea08c03",
+              "leftValue": "={{ $json.has_data }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "64d6b004-c27b-4bc1-8e0a-55f8bd288191",
+      "name": "Has Data?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        560,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { output: {\n  summary: 'No customer conversations were recorded for ' + $('Compute Analytics').first().json.report_date + '.',\n  most_asked_questions: 'None (quiet day).',\n  satisfaction_trend: 'No data for this period.',\n  recommendations: 'No action required. If you expected conversations, check that the chat channels and the database connection are healthy.'\n} } }];"
+      },
+      "id": "9fd0cd71-4bbe-4a81-96cf-a7836cbe8966",
+      "name": "Quiet Day Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        760,
+        180
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Every Morning 07:00": {
+      "main": [
+        [
+          {
+            "node": "Fetch Yesterday Conversations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Yesterday Conversations": {
+      "main": [
+        [
+          {
+            "node": "Compute Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Analytics": {
+      "main": [
+        [
+          {
+            "node": "Has Data?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Executive Report": {
+      "main": [
+        [
+          {
+            "node": "Email Report to Management",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report Schema": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Generate Executive Report",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Generate Executive Report",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Data?": {
+      "main": [
+        [
+          {
+            "node": "Generate Executive Report",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Quiet Day Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quiet Day Report": {
+      "main": [
+        [
+          {
+            "node": "Email Report to Management",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "errorWorkflow": "YOUR_ERROR_WORKFLOW_ID"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "tags": []
+}

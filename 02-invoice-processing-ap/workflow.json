@@ -1,0 +1,1374 @@
+{
+  "name": "Intelligent Invoice Processing (AP)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "invoice-intake",
+        "options": {
+          "binaryPropertyName": "data"
+        },
+        "authentication": "headerAuth"
+      },
+      "id": "5e7d30cf-16a1-4c6b-b9ec-50d8277372c0",
+      "name": "Webhook - Invoice Upload",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -2816,
+        672
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR httpHeaderAuth credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const bin = $input.item.binary || {};\nconst keys = Object.keys(bin);\nconst first = keys.length ? bin[keys[0]] : null;\nreturn { json: { source: 'webhook' }, binary: first ? { data: first } : {} };"
+      },
+      "id": "7a9b6778-b72b-40bc-a480-1b74a7c95543",
+      "name": "Prep Webhook Source",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2592,
+        672
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "ecaf20ae-3d41-436c-be80-251cafb77abb",
+      "name": "Invoice Received",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -2368,
+        576
+      ]
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "has:attachment",
+          "readStatus": "unread"
+        },
+        "options": {
+          "dataPropertyAttachmentsPrefixName": "attachment_",
+          "downloadAttachments": true
+        }
+      },
+      "id": "957df579-851e-4804-8331-78e5d0f8ffbb",
+      "name": "Gmail Trigger - Invoice Inbox",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -2816,
+        864
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR gmailOAuth2 credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const bin = $input.item.binary || {};\nconst keys = Object.keys(bin);\nconst first = keys.length ? bin[keys[0]] : null;\nreturn { json: { source: 'gmail' }, binary: first ? { data: first } : {} };"
+      },
+      "id": "5eaa0c8d-739f-4948-a025-0917b172b2fe",
+      "name": "Prep Gmail Source",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2592,
+        864
+      ]
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "value": "YOUR_RESOURCE_ID",
+          "mode": "list",
+          "cachedResultName": "Invoice Intake",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/YOUR_FOLDER_ID"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "id": "756cf259-0143-4fdc-8a66-299c06806465",
+      "name": "Google Drive Trigger - Invoice Folder",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [
+        -3040,
+        480
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleDriveOAuth2Api credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.id }}"
+        },
+        "options": {
+          "binaryPropertyName": "data"
+        }
+      },
+      "id": "6be0c7ab-bed2-4be5-88c3-70a654bbd8a9",
+      "name": "Download Drive File",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -2816,
+        480
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleDriveOAuth2Api credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "src",
+              "name": "source",
+              "type": "string",
+              "value": "drive"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "e40292f6-e6ec-4752-9236-9f8540c8c0d5",
+      "name": "Prep Drive Source",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2592,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $input.item;\nconst bin = (item.binary && item.binary.data) || null;\nconst fileName = bin && bin.fileName ? bin.fileName : 'unknown';\nconst mimeType = bin && bin.mimeType ? String(bin.mimeType).toLowerCase() : '';\nconst ext = fileName.indexOf('.') >= 0 ? fileName.split('.').pop().toLowerCase() : '';\nconst allowedExt = ['pdf', 'png', 'jpg', 'jpeg'];\nconst allowedMime = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'];\nconst validExt = allowedExt.indexOf(ext) >= 0;\nconst validMime = allowedMime.indexOf(mimeType) >= 0;\nconst valid = !!bin && (validExt || validMime);\n\nlet base64 = '';\nlet visionUrl = '';\nlet visionRequest = {};\nif (valid) {\n  const buffer = await this.helpers.getBinaryDataBuffer(0, 'data');\n  base64 = buffer.toString('base64');\n  const isPdf = ext === 'pdf' || mimeType === 'application/pdf';\n  if (isPdf) {\n    visionUrl = 'https://vision.googleapis.com/v1/files:annotate';\n    visionRequest = { requests: [ { inputConfig: { content: base64, mimeType: 'application/pdf' }, features: [ { type: 'DOCUMENT_TEXT_DETECTION' } ] } ] };\n  } else {\n    visionUrl = 'https://vision.googleapis.com/v1/images:annotate';\n    visionRequest = { requests: [ { image: { content: base64 }, features: [ { type: 'DOCUMENT_TEXT_DETECTION' } ] } ] };\n  }\n}\n\nreturn {\n  json: {\n    valid: valid,\n    fileName: fileName,\n    mimeType: mimeType,\n    fileExtension: ext,\n    source: (item.json && item.json.source) || 'unknown',\n    base64: base64,\n    visionUrl: visionUrl,\n    visionRequest: visionRequest,\n    startMs: Date.now(),\n    startedAt: new Date().toISOString(),\n    validationError: valid ? '' : ('Unsupported or missing file: ' + fileName + ' (' + mimeType + ')'),\n  },\n  binary: item.binary,\n};"
+      },
+      "id": "041e0a38-d5b8-4b39-91e5-ea83e190e576",
+      "name": "Validate & Extract File",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2144,
+        576
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "valid",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c0c9ae80-f6bc-4a0d-9930-6d0b8fadbb82",
+      "name": "Is Valid File?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1920,
+        576
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.visionUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.visionRequest) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "id": "f7dc8ffe-7436-4a12-8676-ffa128020367",
+      "name": "Google Vision OCR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1696,
+        480
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR httpQueryAuth credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const r = $json || {};\nlet text = '';\ntry {\n  const resp = r.responses && r.responses[0];\n  if (resp) {\n    if (resp.fullTextAnnotation && resp.fullTextAnnotation.text) {\n      text = resp.fullTextAnnotation.text;\n    } else if (resp.responses && resp.responses[0] && resp.responses[0].fullTextAnnotation) {\n      text = resp.responses[0].fullTextAnnotation.text || '';\n    }\n  }\n} catch (e) {\n  text = '';\n}\nreturn { json: { ocrText: text } };"
+      },
+      "id": "8b090246-dd1d-476a-9892-73d5a9424e47",
+      "name": "Extract OCR Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1472,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "text": "={{ $json.ocrText }}",
+        "schemaType": "fromJson",
+        "jsonSchemaExample": "{\n  \"vendorName\": \"ACME Supplies Ltd\",\n  \"vendorEmail\": \"billing@acme-supplies.example\",\n  \"invoiceNumber\": \"INV-2026-0042\",\n  \"invoiceDate\": \"2026-07-20\",\n  \"dueDate\": \"2026-08-19\",\n  \"purchaseOrderNumber\": \"PO-99812\",\n  \"currency\": \"USD\",\n  \"taxAmount\": 75.00,\n  \"subtotal\": 1000.00,\n  \"totalAmount\": 1075.00,\n  \"paymentTerms\": \"Net 30\",\n  \"lineItems\": [\n    { \"description\": \"Widget A\", \"quantity\": 10, \"unitPrice\": 100.00, \"amount\": 1000.00 }\n  ],\n  \"confidenceScore\": 0.95\n}",
+        "options": {
+          "systemPromptTemplate": "You are an expert accounts-payable data extraction assistant. Extract invoice fields from the provided OCR text. Return values exactly as they appear; use null for any field you cannot find. confidenceScore is your own 0-1 confidence in the overall extraction. Return structured JSON only."
+        }
+      },
+      "id": "bd443ea4-efde-4e34-9877-9c4662494ea8",
+      "name": "AI Extract Invoice Data",
+      "type": "@n8n/n8n-nodes-langchain.informationExtractor",
+      "typeVersion": 1.2,
+      "position": [
+        -1248,
+        480
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const ex = ($('AI Extract Invoice Data').item.json.output) || $('AI Extract Invoice Data').item.json || {};\nconst v = $('Validate & Extract File').item.json;\nconst ocr = $('Extract OCR Text').item.json.ocrText || '';\n\nfunction num(x) {\n  if (x === null || x === undefined || x === '') return null;\n  const cleaned = String(x).replace(/[^0-9.-]/g, '');\n  const n = parseFloat(cleaned);\n  return isNaN(n) ? null : n;\n}\n\nconst invoiceNumber = ex.invoiceNumber || null;\nconst totalAmount = num(ex.totalAmount);\nconst lineItems = Array.isArray(ex.lineItems) ? ex.lineItems : [];\n\nreturn {\n  json: {\n    vendorName: ex.vendorName || null,\n    vendorEmail: ex.vendorEmail || null,\n    invoiceNumber: invoiceNumber,\n    invoiceDate: ex.invoiceDate || null,\n    dueDate: ex.dueDate || null,\n    poNumber: ex.purchaseOrderNumber || null,\n    currency: ex.currency || null,\n    taxAmount: num(ex.taxAmount),\n    subtotal: num(ex.subtotal),\n    totalAmount: totalAmount,\n    paymentTerms: ex.paymentTerms || null,\n    lineItems: lineItems,\n    lineItemsJson: JSON.stringify(lineItems),\n    confidenceScore: num(ex.confidenceScore),\n    hasRequired: !!(invoiceNumber && totalAmount !== null),\n    ocrText: ocr,\n    fileName: v.fileName,\n    source: v.source,\n    startMs: v.startMs,\n    startedAt: v.startedAt,\n  },\n};"
+      },
+      "id": "ef01b606-ffa0-48d9-a344-d27e3ca57491",
+      "name": "Normalize Extracted Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -896,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "req",
+              "leftValue": "={{ $json.hasRequired }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "246eb1e5-9f74-4d02-8328-67407c3a2762",
+      "name": "Has Required Fields?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -672,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "   SELECT COUNT(*)::int AS cnt FROM invoices WHERE invoice_number = $1 AND vendor_name = $2",
+        "options": {
+          "connectionTimeout": 10,
+          "queryReplacement": "=   {{ [$json.invoiceNumber, $json.vendorName] }}"
+        }
+      },
+      "id": "c23be3fc-3663-48a5-a627-ef85d3f5f33b",
+      "name": "Check Duplicate Invoice",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        -448,
+        288
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR postgres credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "dup",
+              "leftValue": "={{ $json.cnt }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "6d40f059-7653-4dd7-997d-fec743e44e9e",
+      "name": "Is Duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -224,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "support alerts",
+          "mode": "name"
+        },
+        "text": "=:no_entry: *Duplicate invoice detected — processing stopped.*\nVendor: {{ $('Normalize Extracted Data').item.json.vendorName }}\nInvoice #: {{ $('Normalize Extracted Data').item.json.invoiceNumber }}\nTotal: {{ $('Normalize Extracted Data').item.json.totalAmount }}",
+        "otherOptions": {}
+      },
+      "id": "2f0d7718-f0e2-45d2-9e2c-87cbcea0dfae",
+      "name": "Notify Finance - Duplicate",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.5,
+      "position": [
+        0,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR slackApi credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "you@example.com",
+        "subject": "=[Duplicate Invoice] {{ $('Normalize Extracted Data').item.json.invoiceNumber }} - {{ $('Normalize Extracted Data').item.json.vendorName }}",
+        "message": "=<h2>Duplicate invoice detected</h2><p>An invoice matching an existing record (same Invoice Number and Vendor Name) was received and was <b>not</b> processed again.</p><ul><li><b>Vendor:</b> {{ $('Normalize Extracted Data').item.json.vendorName }}</li><li><b>Invoice #:</b> {{ $('Normalize Extracted Data').item.json.invoiceNumber }}</li><li><b>Total:</b> {{ $('Normalize Extracted Data').item.json.totalAmount }}</li></ul>",
+        "options": {}
+      },
+      "id": "c6145636-0817-440f-bc92-5b7244b51558",
+      "name": "Email Finance - Duplicate",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        192
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR gmailOAuth2 credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO execution_log (execution_id, invoice_number, vendor_name, source, status, ai_confidence, processing_ms, duplicate_detected, error_message) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+        "options": {
+          "queryReplacement": "={{ [$execution.id, $('Normalize Extracted Data').item.json.invoiceNumber, $('Normalize Extracted Data').item.json.vendorName, $('Normalize Extracted Data').item.json.source, 'duplicate', $('Normalize Extracted Data').item.json.confidenceScore, ($now.toMillis() - $('Validate & Extract File').item.json.startMs), true, 'Duplicate invoice detected'] }}"
+        }
+      },
+      "id": "72eb8fe5-365b-4328-89c5-a5454466189c",
+      "name": "Log - Duplicate",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        0,
+        384
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR postgres credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO invoices (invoice_number, vendor_name, vendor_email, invoice_date, due_date, po_number, currency, tax_amount, subtotal, total_amount, payment_terms, line_items, confidence_score, source, status, ocr_text) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,'pending_approval',$15) RETURNING id",
+        "options": {
+          "queryReplacement": "={{ [$('Normalize Extracted Data').item.json.invoiceNumber, $('Normalize Extracted Data').item.json.vendorName, $('Normalize Extracted Data').item.json.vendorEmail, $('Normalize Extracted Data').item.json.invoiceDate, $('Normalize Extracted Data').item.json.dueDate, $('Normalize Extracted Data').item.json.poNumber, $('Normalize Extracted Data').item.json.currency, $('Normalize Extracted Data').item.json.taxAmount, $('Normalize Extracted Data').item.json.subtotal, $('Normalize Extracted Data').item.json.totalAmount, $('Normalize Extracted Data').item.json.paymentTerms, $('Normalize Extracted Data').item.json.lineItemsJson, $('Normalize Extracted Data').item.json.confidenceScore, $('Normalize Extracted Data').item.json.source, $('Normalize Extracted Data').item.json.ocrText] }}"
+        }
+      },
+      "id": "4e74d629-a240-4155-981b-69d62daac516",
+      "name": "Save Invoice",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        0,
+        768
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR postgres credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an accounts-payable analyst. Produce a concise summary for the finance team using EXACTLY these labelled lines:\nVendor: <name>\nAmount: <currency total>\nDue Date: <date>\nPayment Risk: <Low/Medium/High with one short reason>\nRecommended Action: <one short sentence>\n\nInvoice data:\nVendor: {{ $('Normalize Extracted Data').item.json.vendorName }}\nInvoice #: {{ $('Normalize Extracted Data').item.json.invoiceNumber }}\nInvoice Date: {{ $('Normalize Extracted Data').item.json.invoiceDate }}\nDue Date: {{ $('Normalize Extracted Data').item.json.dueDate }}\nCurrency: {{ $('Normalize Extracted Data').item.json.currency }}\nSubtotal: {{ $('Normalize Extracted Data').item.json.subtotal }}\nTax: {{ $('Normalize Extracted Data').item.json.taxAmount }}\nTotal: {{ $('Normalize Extracted Data').item.json.totalAmount }}\nPayment Terms: {{ $('Normalize Extracted Data').item.json.paymentTerms }}\nExtraction Confidence: {{ $('Normalize Extracted Data').item.json.confidenceScore }}",
+        "batching": {}
+      },
+      "id": "fcffb139-8726-4fe2-904a-4c06c677abca",
+      "name": "AI Invoice Summary",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        224,
+        768
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "sendTo": "you@example.com",
+        "subject": "=[Invoice Received] {{ $('Normalize Extracted Data').item.json.vendorName }} - {{ $('Normalize Extracted Data').item.json.invoiceNumber }}",
+        "message": "=<h2>New Invoice Ready for Approval</h2><h3>AI Summary</h3><pre>{{ $('AI Invoice Summary').item.json.text }}</pre><h3>Extracted Details</h3><ul><li><b>Vendor:</b> {{ $('Normalize Extracted Data').item.json.vendorName }} ({{ $('Normalize Extracted Data').item.json.vendorEmail }})</li><li><b>Invoice #:</b> {{ $('Normalize Extracted Data').item.json.invoiceNumber }}</li><li><b>Invoice Date:</b> {{ $('Normalize Extracted Data').item.json.invoiceDate }}</li><li><b>Due Date:</b> {{ $('Normalize Extracted Data').item.json.dueDate }}</li><li><b>PO #:</b> {{ $('Normalize Extracted Data').item.json.poNumber }}</li><li><b>Subtotal:</b> {{ $('Normalize Extracted Data').item.json.subtotal }}</li><li><b>Tax:</b> {{ $('Normalize Extracted Data').item.json.taxAmount }}</li><li><b>Total:</b> {{ $('Normalize Extracted Data').item.json.totalAmount }} {{ $('Normalize Extracted Data').item.json.currency }}</li><li><b>Payment Terms:</b> {{ $('Normalize Extracted Data').item.json.paymentTerms }}</li><li><b>AI Confidence:</b> {{ $('Normalize Extracted Data').item.json.confidenceScore }}</li></ul><p>An approval request has been sent to the finance Slack channel.</p>",
+        "options": {}
+      },
+      "id": "88bcabb6-6685-4710-a612-f915fe51b907",
+      "name": "Email Finance - Invoice Details",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        576,
+        768
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR gmailOAuth2 credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendAndWait",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "support alerts",
+          "mode": "name"
+        },
+        "message": "=*Invoice approval required*\nVendor: {{ $('Normalize Extracted Data').item.json.vendorName }}\nInvoice #: {{ $('Normalize Extracted Data').item.json.invoiceNumber }}\nTotal: {{ $('Normalize Extracted Data').item.json.totalAmount }} {{ $('Normalize Extracted Data').item.json.currency }}\nDue: {{ $('Normalize Extracted Data').item.json.dueDate }}\n\nAI Summary:\n{{ $('AI Invoice Summary').item.json.text }}",
+        "responseType": "customForm",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Decision",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Approve"
+                  },
+                  {
+                    "option": "Reject"
+                  }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Rejection Reason",
+              "fieldType": "textarea"
+            }
+          ]
+        },
+        "options": {
+          "limitWaitTime": {
+            "values": {
+              "resumeAmount": 3,
+              "resumeUnit": "days"
+            }
+          }
+        }
+      },
+      "id": "1825e179-c2a3-4fa7-9b96-2e4e578a8d9a",
+      "name": "Slack Approval Request",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.5,
+      "position": [
+        800,
+        768
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR slackApi credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "apr",
+              "leftValue": "={{ $json.data.Decision }}",
+              "rightValue": "Approve",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9468c4fb-8552-4c1d-8ca7-d7d65f374d3a",
+      "name": "Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1024,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE invoices SET status='approved', approved_at=NOW() WHERE invoice_number=$1 AND vendor_name=$2",
+        "options": {
+          "queryReplacement": "={{ [$('Normalize Extracted Data').item.json.invoiceNumber, $('Normalize Extracted Data').item.json.vendorName] }}"
+        }
+      },
+      "id": "52721583-99c5-484f-9599-af8e11a1a097",
+      "name": "Mark Invoice Approved",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1248,
+        672
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR postgres credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "you@example.com",
+        "subject": "=[Invoice Approved] {{ $('Normalize Extracted Data').item.json.invoiceNumber }} - {{ $('Normalize Extracted Data').item.json.vendorName }}",
+        "message": "=<h2>Invoice Approved</h2><p>The following invoice has been <b>approved</b> for payment.</p><ul><li><b>Vendor:</b> {{ $('Normalize Extracted Data').item.json.vendorName }}</li><li><b>Invoice #:</b> {{ $('Normalize Extracted Data').item.json.invoiceNumber }}</li><li><b>Total:</b> {{ $('Normalize Extracted Data').item.json.totalAmount }} {{ $('Normalize Extracted Data').item.json.currency }}</li><li><b>Due Date:</b> {{ $('Normalize Extracted Data').item.json.dueDate }}</li></ul>",
+        "options": {}
+      },
+      "id": "e4293346-f9cb-406c-aa97-34fba0cfdcf5",
+      "name": "Notify Submitter - Approved",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1472,
+        672
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR gmailOAuth2 credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const v = $('Validate & Extract File').item.json;\nconst buffer = Buffer.from(v.base64 || '', 'base64');\nconst binary = await this.helpers.prepareBinaryData(buffer, v.fileName, v.mimeType || undefined);\nreturn { json: { fileName: v.fileName }, binary: { data: binary } };"
+      },
+      "id": "a604bd2a-d37d-408f-b0bc-9c74af749aef",
+      "name": "Rebuild Original Binary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1696,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE invoices SET status='rejected', rejection_reason=$3, rejected_at=NOW() WHERE invoice_number=$1 AND vendor_name=$2",
+        "options": {
+          "queryReplacement": "={{ [$('Normalize Extracted Data').item.json.invoiceNumber, $('Normalize Extracted Data').item.json.vendorName, $('Slack Approval Request').item.json.data['Rejection Reason']] }}"
+        }
+      },
+      "id": "143acd3f-324c-458c-8dbc-eb5414dac826",
+      "name": "Mark Invoice Rejected",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1248,
+        864
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR postgres credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "you@example.com",
+        "subject": "=[Invoice Rejected] {{ $('Normalize Extracted Data').item.json.invoiceNumber }} - {{ $('Normalize Extracted Data').item.json.vendorName }}",
+        "message": "=<h2>Invoice Rejected</h2><p>The following invoice has been <b>rejected</b>.</p><ul><li><b>Vendor:</b> {{ $('Normalize Extracted Data').item.json.vendorName }}</li><li><b>Invoice #:</b> {{ $('Normalize Extracted Data').item.json.invoiceNumber }}</li><li><b>Total:</b> {{ $('Normalize Extracted Data').item.json.totalAmount }} {{ $('Normalize Extracted Data').item.json.currency }}</li></ul><p><b>Reason:</b> {{ $('Slack Approval Request').item.json.data['Rejection Reason'] }}</p>",
+        "options": {}
+      },
+      "id": "47015309-cc87-4ac7-897e-7eae7fbf91b1",
+      "name": "Notify Submitter - Rejected",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1472,
+        864
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR gmailOAuth2 credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "support alerts",
+          "mode": "name"
+        },
+        "text": "=:warning: *Invoice needs human review* — required fields missing.\nVendor: {{ $json.vendorName }}\nInvoice #: {{ $json.invoiceNumber }}\nTotal: {{ $json.totalAmount }}\nSource: {{ $json.source }} | File: {{ $json.fileName }}",
+        "otherOptions": {}
+      },
+      "id": "6838b0b1-89e8-4b6d-9979-a7ea3fc12c6a",
+      "name": "Notify Finance - Human Review",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.5,
+      "position": [
+        -448,
+        480
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR slackApi credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "you@example.com",
+        "subject": "=[Invoice Review Needed] {{ $json.vendorName }} - {{ $json.fileName }}",
+        "message": "=<h2>Invoice needs human review</h2><p>An invoice could not be processed automatically because required fields (Invoice Number and/or Total Amount) are missing.</p><ul><li><b>Vendor:</b> {{ $json.vendorName }}</li><li><b>Invoice #:</b> {{ $json.invoiceNumber }}</li><li><b>Total:</b> {{ $json.totalAmount }}</li><li><b>Source:</b> {{ $json.source }}</li><li><b>File:</b> {{ $json.fileName }}</li></ul>",
+        "options": {}
+      },
+      "id": "116b0490-7af1-45d6-9b0b-4b54d0736bb8",
+      "name": "Email Finance - Human Review",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -448,
+        672
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR gmailOAuth2 credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO execution_log (execution_id, invoice_number, vendor_name, source, status, ai_confidence, processing_ms, duplicate_detected, error_message) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+        "options": {
+          "queryReplacement": "={{ [$execution.id, $json.invoiceNumber, $json.vendorName, $json.source, 'needs_review', $json.confidenceScore, ($now.toMillis() - $json.startMs), false, 'Missing required fields (invoice number or total amount)'] }}"
+        }
+      },
+      "id": "e3b75f75-701c-4bdf-8b0c-4e9b387ac22f",
+      "name": "Log - Human Review",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        -448,
+        864
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR postgres credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO execution_log (execution_id, invoice_number, vendor_name, source, status, ai_confidence, processing_ms, duplicate_detected, error_message) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+        "options": {
+          "queryReplacement": "={{ [$execution.id, null, null, $json.source, 'validation_failed', null, ($now.toMillis() - $json.startMs), false, $json.validationError] }}"
+        }
+      },
+      "id": "94d23ffa-bef7-41be-b771-eca0c30af344",
+      "name": "Log - Validation Error",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        -1696,
+        672
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR postgres credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "={{ $('Validate & Extract File').item.json.fileName }}",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive",
+          "cachedResultName": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "YOUR_RESOURCE_ID",
+          "mode": "list",
+          "cachedResultName": "Processed Invoices",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/YOUR_FOLDER_ID"
+        },
+        "options": {}
+      },
+      "id": "f7142c68-cc1c-498c-9363-329ea0b0a5c3",
+      "name": "Archive to Processed Invoices",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1920,
+        768
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleDriveOAuth2Api credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO execution_log (execution_id, invoice_number, vendor_name, source, status, ai_confidence, processing_ms, duplicate_detected, error_message) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+        "options": {
+          "queryReplacement": "={{ [$execution.id, $('Normalize Extracted Data').item.json.invoiceNumber, $('Normalize Extracted Data').item.json.vendorName, $('Normalize Extracted Data').item.json.source, 'processed', $('Normalize Extracted Data').item.json.confidenceScore, ($now.toMillis() - $('Validate & Extract File').item.json.startMs), false, ''] }}"
+        }
+      },
+      "id": "c80dc137-d894-460e-99c8-24052e35a230",
+      "name": "Log - Execution Success",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2144,
+        768
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR postgres credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.6-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        -1328,
+        688
+      ],
+      "id": "309e0fe1-695d-458b-937c-9efa02703765",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googlePalmApi credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.6-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        160,
+        976
+      ],
+      "id": "75f084ff-7b26-4d19-a334-3c10fe899da0",
+      "name": "Google Gemini Chat Model1",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googlePalmApi credential"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook - Invoice Upload": {
+      "main": [
+        [
+          {
+            "node": "Prep Webhook Source",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep Webhook Source": {
+      "main": [
+        [
+          {
+            "node": "Invoice Received",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Invoice Received": {
+      "main": [
+        [
+          {
+            "node": "Validate & Extract File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Trigger - Invoice Inbox": {
+      "main": [
+        [
+          {
+            "node": "Prep Gmail Source",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep Gmail Source": {
+      "main": [
+        [
+          {
+            "node": "Invoice Received",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Drive Trigger - Invoice Folder": {
+      "main": [
+        [
+          {
+            "node": "Download Drive File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Drive File": {
+      "main": [
+        [
+          {
+            "node": "Prep Drive Source",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep Drive Source": {
+      "main": [
+        [
+          {
+            "node": "Invoice Received",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Extract File": {
+      "main": [
+        [
+          {
+            "node": "Is Valid File?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Valid File?": {
+      "main": [
+        [
+          {
+            "node": "Google Vision OCR",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log - Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Vision OCR": {
+      "main": [
+        [
+          {
+            "node": "Extract OCR Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract OCR Text": {
+      "main": [
+        [
+          {
+            "node": "AI Extract Invoice Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Extract Invoice Data": {
+      "main": [
+        [
+          {
+            "node": "Normalize Extracted Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Extracted Data": {
+      "main": [
+        [
+          {
+            "node": "Has Required Fields?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Required Fields?": {
+      "main": [
+        [
+          {
+            "node": "Check Duplicate Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Finance - Human Review",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email Finance - Human Review",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log - Human Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Duplicate Invoice": {
+      "main": [
+        [
+          {
+            "node": "Is Duplicate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Duplicate?": {
+      "main": [
+        [
+          {
+            "node": "Notify Finance - Duplicate",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email Finance - Duplicate",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log - Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Invoice": {
+      "main": [
+        [
+          {
+            "node": "AI Invoice Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Invoice Summary": {
+      "main": [
+        [
+          {
+            "node": "Email Finance - Invoice Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Finance - Invoice Details": {
+      "main": [
+        [
+          {
+            "node": "Slack Approval Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Approval Request": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "Mark Invoice Approved",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Invoice Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Invoice Approved": {
+      "main": [
+        [
+          {
+            "node": "Notify Submitter - Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Submitter - Approved": {
+      "main": [
+        [
+          {
+            "node": "Rebuild Original Binary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rebuild Original Binary": {
+      "main": [
+        [
+          {
+            "node": "Archive to Processed Invoices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Invoice Rejected": {
+      "main": [
+        [
+          {
+            "node": "Notify Submitter - Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Submitter - Rejected": {
+      "main": [
+        [
+          {
+            "node": "Rebuild Original Binary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Archive to Processed Invoices": {
+      "main": [
+        [
+          {
+            "node": "Log - Execution Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Extract Invoice Data",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Invoice Summary",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "errorWorkflow": "YOUR_ERROR_WORKFLOW_ID"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "tags": []
+}

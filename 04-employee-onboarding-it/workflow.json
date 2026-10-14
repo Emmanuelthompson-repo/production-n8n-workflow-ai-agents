@@ -1,0 +1,2423 @@
+{
+  "name": "AI Employee Onboarding & IT Provisioning",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "employee-onboarding",
+        "authentication": "headerAuth",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "d8cd5236-054a-49b8-a24d-0aaecbd0ad61",
+      "name": "Onboarding Intake (Webhook)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1568,
+        1536
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR httpHeaderAuth credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json || {};\nconst body = raw.body || raw;\nconst headers = raw.headers || {};\n\n// --- Security: webhook authentication ---\n// Enforcement happens at the Webhook node itself (Header Auth credential).\n// A request only reaches this code if it already passed that check.\n// This just records metadata for the audit trail.\nconst provided = headers['x-onboarding-token'] || headers['X-Onboarding-Token'] || '';\nconst hasToken = provided !== '';\n\nfunction pick() {\n  for (let i = 0; i < arguments.length; i++) {\n    const k = arguments[i];\n    if (body[k] !== undefined && body[k] !== null && String(body[k]).trim() !== '') return String(body[k]).trim();\n  }\n  return '';\n}\n\nconst emp = {\n  fullName: pick('fullName','full_name','name'),\n  personalEmail: pick('personalEmail','personal_email','email').toLowerCase(),\n  companyEmail: pick('companyEmail','company_email','workEmail').toLowerCase(),\n  phone: pick('phone','phoneNumber','phone_number'),\n  jobTitle: pick('jobTitle','job_title','title','role'),\n  department: pick('department','dept'),\n  officeLocation: pick('officeLocation','office_location','location','office'),\n  employmentType: pick('employmentType','employment_type','type') || 'Full-time',\n  startDate: pick('startDate','start_date','startingDate'),\n  manager: pick('manager','managerName','manager_name','reportsTo'),\n     managerEmail: pick('managerEmail','manager_email').toLowerCase(),\n  team: pick('team','squad'),\n  equipment: pick('equipment','equipmentRequirements','equipment_requirements'),\n  _security: { hasToken: hasToken, source: headers['user-agent'] || 'unknown' },\n  _receivedAt: new Date().toISOString(),\n};\nreturn [{ json: emp }];"
+      },
+      "id": "b363e13b-38a0-4536-b45e-21fe6fcd6308",
+      "name": "Normalize & Verify Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1344,
+        1536
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_RESOURCE_ID",
+          "mode": "list",
+          "cachedResultName": "Employee Onboarding Workbook",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Onboarding_Tracker",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit#gid=0"
+        },
+        "options": {}
+      },
+      "id": "43f25a66-4594-435b-b5ed-0759aef18cb5",
+      "name": "Lookup Existing Employees",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -1120,
+        1536
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleSheetsOAuth2Api credential"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const e = $('Normalize & Verify Request').first().json;\nconst errors = [];\n\n// Required fields (STEP 1)\nconst required = ['fullName','personalEmail','jobTitle','department','startDate','manager'];\nfor (const f of required) { if (!e[f] || String(e[f]).trim() === '') errors.push('Missing required field: ' + f); }\n\n// Email format\nif (e.personalEmail && !/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(e.personalEmail)) errors.push('Invalid personal email format');\n\n// Valid start date: parseable and not in the past\nlet startOk = false;\nif (e.startDate) {\n  const d = new Date(e.startDate);\n  if (!isNaN(d.getTime())) {\n    startOk = true;\n    const today = new Date(); today.setHours(0,0,0,0);\n    if (d < today) errors.push('Start date is in the past: ' + e.startDate);\n  } else { errors.push('Unparseable start date: ' + e.startDate); }\n}\n\n// Department mapping (STEP 1)\nconst deptMap = {\n  'engineering':'Engineering','eng':'Engineering','sales':'Sales','marketing':'Marketing',\n  'finance':'Finance','hr':'People & HR','people':'People & HR','support':'Customer Support',\n  'product':'Product','design':'Design','operations':'Operations','it':'IT'\n};\nconst deptKey = (e.department || '').toLowerCase().trim();\nconst mappedDept = deptMap[deptKey] || '';\nif (e.department && !mappedDept) errors.push('Unknown department (no mapping): ' + e.department);\n\n// Manager assignment (STEP 1)\nif (!e.manager) errors.push('No manager assigned');\n\n// Duplicate detection (STEP 1)\nconst existing = $('Lookup Existing Employees').all().map(i => i.json).filter(r => r && Object.keys(r).length > 0);\nconst dupe = existing.some(r => {\n  const em = String(r.personalEmail || r['Personal Email'] || r.email || '').toLowerCase();\n  return em && em === e.personalEmail;\n});\nif (dupe) errors.push('Duplicate employee record for ' + e.personalEmail);\n\nconst isValid = errors.length === 0;\nreturn [{ json: Object.assign({}, e, {\n  department: mappedDept || e.department,\n  isValid: isValid,\n  validationErrors: errors,\n  validationSummary: isValid ? 'PASSED' : errors.join('; '),\n  employeeId: (e.personalEmail || 'unknown') + '-' + Date.now(),\n}) }];"
+      },
+      "id": "2b121d18-5ccc-46d7-b87c-acd10ff453d2",
+      "name": "Validate Onboarding Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -896,
+        1536
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "valid",
+              "leftValue": "={{ $json.isValid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "cfac5abb-0d9f-47c9-a372-a887f77b4926",
+      "name": "Is Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -672,
+        1536
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "you@example.com",
+        "subject": "=[Onboarding] Validation failed for {{ $json.fullName || \"unknown candidate\" }}",
+        "message": "=<h3>Onboarding validation failed</h3><p><b>Candidate:</b> {{ $json.fullName }}<br><b>Email:</b> {{ $json.personalEmail }}<br><b>Department:</b> {{ $json.department }}<br><b>Start date:</b> {{ $json.startDate }}</p><p><b>Issues:</b></p><p>{{ $json.validationSummary }}</p><p>Workflow halted for this record. Please correct the source data and resubmit.</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "903f17f0-a449-4b2b-9620-8c5da1d6dc30",
+      "name": "Notify HR (Validation Failed)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -512,
+        1120
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR gmailOAuth2 credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_RESOURCE_ID",
+          "mode": "list",
+          "cachedResultName": "Employee Onboarding Workbook",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1933344476,
+          "mode": "list",
+          "cachedResultName": "Audit_Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit#gid=1933344476"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "event",
+              "displayName": "event",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "employee",
+              "displayName": "employee",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "detail",
+              "displayName": "detail",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "executionId",
+              "displayName": "executionId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "38df30fa-ccbb-4cb4-886c-e377e3bf4ed8",
+      "name": "Log Validation Issue",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -768,
+        2048
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleSheetsOAuth2Api credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const e = $('Validate Onboarding Data').first().json;\nlet ai = {};\ntry {\n  const out = $('AI Onboarding Analysis').first().json;\n  const t = out && out.output && out.output[0] && out.output[0].content && out.output[0].content[0] ? out.output[0].content[0].text : null;\n  ai = (typeof t === 'string') ? JSON.parse(t) : (t || {});\n} catch (err) { ai = {}; }\n\nconst plan = {\n  employeeId: e.employeeId,\n  fullName: e.fullName,\n  personalEmail: e.personalEmail,\n  companyEmail: e.companyEmail,\n  phone: e.phone,\n  jobTitle: e.jobTitle,\n  department: e.department,\n  officeLocation: e.officeLocation,\n  employmentType: e.employmentType,\n  startDate: e.startDate,\n  manager: e.manager,\n  managerEmail: e.managerEmail,\n  team: e.team,\n  equipment: e.equipment,\n  onboardingSummary: ai.onboarding_summary || 'Onboarding plan pending AI analysis.',\n  welcomeMessage: ai.welcome_message || ('Welcome to the team, ' + (e.fullName || '') + '!'),\n  checklist: ai.checklist || [],\n  trainingPath: ai.training_path || [],\n  equipmentRecommendations: ai.equipment_recommendations || [],\n  departmentResources: ai.department_resources || [],\n  folderName: 'Onboarding - ' + (e.fullName || 'Unknown') + ' (' + (e.startDate || '') + ')',\n  status: 'In Progress',\n};\nreturn [{ json: plan }];"
+      },
+      "id": "c61db84d-a32b-4d53-959a-91799f07191a",
+      "name": "Build Onboarding Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "folder",
+        "name": "={{ $json.folderName }}",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive",
+          "cachedResultName": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "root",
+          "cachedResultName": "/ (Root folder)"
+        },
+        "options": {}
+      },
+      "id": "9a79ee29-b1a0-44bf-aedc-3a0e742f18c2",
+      "name": "Create HR Employee Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        0,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleDriveOAuth2Api credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_RESOURCE_ID",
+          "mode": "list",
+          "cachedResultName": "Employee Onboarding Workbook",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "HR_Documents"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "employee": "={{ $('Build Onboarding Plan').item.json.fullName }}",
+            "folderId": "={{ $json.id }}",
+            "folderName": "={{ $json.name }}",
+            "requiredDocs": "Offer Letter, Employment Contract, ID Documents, Tax Forms, NDA, Policy Acknowledgements",
+            "status": "Pending Signatures",
+            "createdAt": "={{ $now.toISO() }}"
+          },
+          "schema": [
+            {
+              "id": "employee",
+              "displayName": "employee",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "folderId",
+              "displayName": "folderId",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "folderName",
+              "displayName": "folderName",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "requiredDocs",
+              "displayName": "requiredDocs",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "createdAt",
+              "displayName": "createdAt",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0f65f209-a594-4256-a3ff-8a9f18785bbb",
+      "name": "Log HR Document Checklist",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        224,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleSheetsOAuth2Api credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const p = $('Build Onboarding Plan').first().json;\nconst applies = (p.department || '').toLowerCase();\nconst isTech = ['engineering','product','it','design'].indexOf(applies) !== -1;\n\n// STEP 3 — account creation tasks\nconst accounts = [\n  { category: 'Account', system: 'Google Workspace', task: 'Provision Google Workspace / email account' },\n  { category: 'Account', system: 'Slack', task: 'Create Slack account and add to team channels' },\n  { category: 'Account', system: 'Microsoft Teams', task: 'Provision Microsoft Teams account' },\n  { category: 'Account', system: 'Notion', task: 'Grant Notion workspace access' },\n  { category: 'Account', system: 'Jira', task: 'Create Jira account and assign project roles' },\n  { category: 'Account', system: 'CRM', task: 'Create CRM account (if customer-facing)' },\n  { category: 'Account', system: 'Internal Portal', task: 'Grant internal portal / intranet access' },\n];\nif (isTech) accounts.push({ category: 'Account', system: 'GitHub', task: 'Create GitHub access and add to org teams' });\n\n// STEP 4 — IT provisioning tasks\nconst it = [\n  { category: 'IT', system: 'Hardware', task: 'Assign laptop: ' + (p.equipment || 'standard kit') },\n  { category: 'IT', system: 'Software', task: 'Install standard + role software' },\n  { category: 'IT', system: 'VPN', task: 'Provision VPN access' },\n  { category: 'IT', system: 'MFA', task: 'Enroll in MFA / hardware key' },\n  { category: 'IT', system: 'Email Signature', task: 'Configure company email signature' },\n  { category: 'IT', system: 'Security', task: 'Apply security policies / endpoint management' },\n  { category: 'IT', system: 'Inventory', task: 'Update device inventory record' },\n];\n\nconst all = accounts.concat(it);\nreturn all.map(function(t){ return { json: {\n  employee: p.fullName,\n  email: p.personalEmail,\n  department: p.department,\n  startDate: p.startDate,\n  category: t.category,\n  system: t.system,\n  task: t.task,\n  status: 'Pending',\n  createdAt: new Date().toISOString(),\n} }; });"
+      },
+      "id": "355cbd99-1a39-4d49-b393-fa1c1f40cbd2",
+      "name": "Generate Provisioning Tasks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_RESOURCE_ID",
+          "mode": "list",
+          "cachedResultName": "Employee Onboarding Workbook",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1940548882,
+          "mode": "list",
+          "cachedResultName": "Provisioning_Tasks",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit#gid=1940548882"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "employee",
+              "displayName": "employee",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "department",
+              "displayName": "department",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "startDate",
+              "displayName": "startDate",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "system",
+              "displayName": "system",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "task",
+              "displayName": "task",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "createdAt",
+              "displayName": "createdAt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "ec968a7b-b210-446f-9cf9-325bd3bb3301",
+      "name": "Log Provisioning Tasks",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        224,
+        192
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleSheetsOAuth2Api credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "it team alerts",
+          "mode": "name"
+        },
+        "text": "=:computer: *New IT provisioning request*\n*Employee:* {{ $json.fullName }} — {{ $json.jobTitle }} ({{ $json.department }})\n*Start date:* {{ $json.startDate }}\n*Equipment:* {{ $json.equipment }}\n*Recommended kit:* {{ $json.equipmentRecommendations.join(\", \") }}\nProvisioning tasks have been logged. Please action laptop, software, VPN, MFA and accounts.",
+        "otherOptions": {}
+      },
+      "id": "ba531fec-8268-4d92-a5a5-a779c99156b8",
+      "name": "Notify IT Team",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.5,
+      "position": [
+        0,
+        384
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR slackApi credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "you@example.com",
+        "subject": "=New team member starting {{ $json.startDate }}: {{ $json.fullName }}",
+        "message": "=<h2>Your new team member is being onboarded</h2><p><b>{{ $json.fullName }}</b> — {{ $json.jobTitle }} ({{ $json.team }} / {{ $json.department }})</p><p><b>Start date:</b> {{ $json.startDate }}<br><b>Location:</b> {{ $json.officeLocation }}</p><h3>Summary</h3><p>{{ $json.onboardingSummary }}</p><h3>First-week objectives / checklist</h3><ul>{{ $json.checklist.map(c => \"<li>\" + c + \"</li>\").join(\"\") }}</ul><h3>Team introduction checklist</h3><ul><li>Announce {{ $json.fullName }} to the team</li><li>Assign an onboarding buddy</li><li>Schedule 1:1 for day 1</li><li>Share first-week meeting calendar</li></ul><p>Please confirm equipment readiness and prepare a first-week agenda.</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "f88a8190-63ac-4079-84d6-16d119e06063",
+      "name": "Notify Manager",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        576
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR gmailOAuth2 credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.personalEmail }}",
+        "subject": "=Welcome to the team, {{ $json.fullName }}! 🎉",
+        "message": "=<h2>Welcome aboard, {{ $json.fullName }}!</h2><p>{{ $json.welcomeMessage }}</p><h3>Your role</h3><p>{{ $json.jobTitle }} on the {{ $json.team }} team ({{ $json.department }}), starting <b>{{ $json.startDate }}</b>.</p><h3>Your onboarding checklist</h3><ul>{{ $json.checklist.map(c => \"<li>\" + c + \"</li>\").join(\"\") }}</ul><h3>Suggested training path</h3><ul>{{ $json.trainingPath.map(t => \"<li>\" + t + \"</li>\").join(\"\") }}</ul><h3>Helpful resources</h3><ul>{{ $json.departmentResources.map(r => \"<li>\" + r + \"</li>\").join(\"\") }}</ul><p>Attached to your onboarding: employee handbook, company directory and your first-day agenda. See you soon!</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "2e1ea1ba-1dc3-47ca-8819-d4a82ce09bb7",
+      "name": "Send Welcome Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        768
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR gmailOAuth2 credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "hr and welcome alerts",
+          "mode": "name"
+        },
+        "text": "=:wave: Please welcome *{{ $json.fullName }}* who joins us as *{{ $json.jobTitle }}* on the {{ $json.team }} team ({{ $json.department }}) starting *{{ $json.startDate }}*! {{ $json.welcomeMessage }}",
+        "otherOptions": {}
+      },
+      "id": "d0da49c6-35e9-475a-9ddb-4c5fd26cef82",
+      "name": "Slack Welcome Message",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.5,
+      "position": [
+        0,
+        960
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR slackApi credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "YOUR_CALENDAR_ID@group.calendar.google.com",
+          "mode": "id"
+        },
+        "start": "={{ $json.startDate }}T09:00:00",
+        "end": "={{ $json.startDate }}T10:00:00",
+        "additionalFields": {
+          "attendees": [
+            "={\"email\": \"jane@example.com\"}",
+            "= {{ $json.managerEmail }}"
+          ],
+          "description": "=First-day agenda for {{ $json.fullName }} ({{ $json.jobTitle }}).\n\nSummary: {{ $json.onboardingSummary }}\n\nChecklist:\n{{ $json.checklist.join(\"\\n\") }}",
+          "sendUpdates": "all",
+          "summary": "=Day 1 Orientation — {{ $json.fullName }}"
+        }
+      },
+      "id": "9a06d12f-9de6-4e4a-a3c9-26ac887a2333",
+      "name": "Create First-Day Calendar Event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        16,
+        1136
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleCalendarOAuth2Api credential"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_RESOURCE_ID",
+          "mode": "list",
+          "cachedResultName": "Employee Onboarding Workbook",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Onboarding_Tracker"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "employeeId": "={{ $json.employeeId }}",
+            "fullName": "={{ $json.fullName }}",
+            "personalEmail": "={{ $json.personalEmail }}",
+            "jobTitle": "={{ $json.jobTitle }}",
+            "department": "={{ $json.department }}",
+            "manager": "={{ $json.manager }}",
+            "startDate": "={{ $json.startDate }}",
+            "status": "In Progress",
+            "accountStatus": "Pending",
+            "itStatus": "Pending",
+            "documentStatus": "Pending",
+            "trainingStatus": "Pending",
+            "managerApproval": "Pending",
+            "createdAt": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "employeeId",
+              "displayName": "employeeId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "fullName",
+              "displayName": "fullName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "personalEmail",
+              "displayName": "personalEmail",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "jobTitle",
+              "displayName": "jobTitle",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "department",
+              "displayName": "department",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "manager",
+              "displayName": "manager",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "startDate",
+              "displayName": "startDate",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "accountStatus",
+              "displayName": "accountStatus",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "itStatus",
+              "displayName": "itStatus",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "documentStatus",
+              "displayName": "documentStatus",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "trainingStatus",
+              "displayName": "trainingStatus",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "managerApproval",
+              "displayName": "managerApproval",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "createdAt",
+              "displayName": "createdAt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "c441fddd-c548-423d-b9ed-bac705271925",
+      "name": "Log Onboarding Record",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        0,
+        1344
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleSheetsOAuth2Api credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_RESOURCE_ID",
+          "mode": "list",
+          "cachedResultName": "Employee Onboarding Workbook",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Training"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "employee": "={{ $json.fullName }}",
+            "department": "={{ $json.department }}",
+            "startDate": "={{ $json.startDate }}",
+            "coreCourses": "Orientation, Security Awareness, Compliance",
+            "departmentTraining": "={{ $json.trainingPath.join(\", \") }}",
+            "status": "Assigned",
+            "assignedAt": "={{ $now.toISO() }}"
+          },
+          "schema": [
+            {
+              "id": "employee",
+              "displayName": "employee",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "department",
+              "displayName": "department",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "startDate",
+              "displayName": "startDate",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "coreCourses",
+              "displayName": "coreCourses",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "departmentTraining",
+              "displayName": "departmentTraining",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "assignedAt",
+              "displayName": "assignedAt",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c7ce0775-43b0-4d23-b5a2-24b119686ce3",
+      "name": "Log Training Assignments",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        0,
+        1536
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleSheetsOAuth2Api credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_RESOURCE_ID",
+          "mode": "list",
+          "cachedResultName": "Employee Onboarding Workbook",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Audit_Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now.toISO() }}",
+            "event": "ONBOARDING_INITIATED",
+            "employee": "={{ $json.fullName }}",
+            "email": "={{ $json.personalEmail }}",
+            "detail": "=Accounts, IT, HR docs, training, comms and follow-ups dispatched",
+            "executionId": "={{ $execution.id }}"
+          },
+          "schema": [
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "event",
+              "displayName": "event",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "employee",
+              "displayName": "employee",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "detail",
+              "displayName": "detail",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "executionId",
+              "displayName": "executionId",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "231b54f2-f34b-450a-bcf8-e3e493c66cad",
+      "name": "Write Audit Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        0,
+        1728
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleSheetsOAuth2Api credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const p = $('Build Onboarding Plan').first().json;\nconst base = DateTime.fromISO(String(p.startDate || ''));\nfunction addDays(d, n){ return d.plus({ days: n }).toFormat('yyyy-MM-dd'); }\nconst name = p.fullName || 'there';\nconst touchpoints = [\n  { milestone: 'Day 1',   offset: 0,  type: 'Welcome check-in',            to: p.personalEmail, msg: 'Hi ' + name + ', welcome! How is your first day going? Reach out anytime.' },\n  { milestone: 'Week 1',  offset: 7,  type: 'Manager feedback request',    to: 'MANAGER',       msg: 'Please share early feedback on ' + name + ' after their first week.' },\n  { milestone: 'Week 2',  offset: 14, type: 'Employee satisfaction survey', to: p.personalEmail, msg: 'Hi ' + name + ', a quick survey: how has your onboarding experience been so far?' },\n  { milestone: 'Month 1', offset: 30, type: 'Performance check-in',         to: p.personalEmail, msg: 'Hi ' + name + ', time for your 30-day check-in. Let us schedule a chat.' },\n  { milestone: 'Month 3', offset: 90, type: 'Probation review reminder',    to: 'MANAGER',       msg: 'Reminder: 90-day probation review for ' + name + ' is due.' },\n];\nreturn touchpoints.map(function(t){ return { json: {\n  employee: p.fullName,\n  employeeEmail: p.personalEmail,\n  manager: p.manager,\n  milestone: t.milestone,\n  followUpType: t.type,\n  recipient: t.to === 'MANAGER' ? 'manager' : 'employee',\n  dueDate: base.isValid ? addDays(base, t.offset) : '',\n  message: t.msg,\n  status: 'Pending',\n  createdAt: new Date().toISOString(),\n} }; });"
+      },
+      "id": "5d1ee3fc-45ff-4d23-a0c0-d7384a64d95a",
+      "name": "Generate Follow-up Schedule",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        1920
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_RESOURCE_ID",
+          "mode": "list",
+          "cachedResultName": "Employee Onboarding Workbook",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1502537481,
+          "mode": "list",
+          "cachedResultName": "Follow_Ups",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit#gid=1502537481"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "employee",
+              "displayName": "employee",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "employeeEmai",
+              "displayName": "employeeEmai",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "manager",
+              "displayName": "manager",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "milestone ",
+              "displayName": "milestone ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "followUpType",
+              "displayName": "followUpType",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "recipient ",
+              "displayName": "recipient ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "dueDate",
+              "displayName": "dueDate",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "createdAt",
+              "displayName": "createdAt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "71962b9c-300b-44ac-be3c-d1777056d06e",
+      "name": "Log Follow-up Schedule",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        224,
+        1920
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleSheetsOAuth2Api credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_RESOURCE_ID",
+          "mode": "list",
+          "cachedResultName": "Employee Onboarding Workbook",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Dead_Letter_Queue"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now.toISO() }}",
+            "stage": "AI_ANALYSIS",
+            "employee": "={{ $('Validate Onboarding Data').item.json.fullName }}",
+            "email": "={{ $('Validate Onboarding Data').item.json.personalEmail }}",
+            "error": "AI analysis failed after retries",
+            "executionId": "={{ $execution.id }}"
+          },
+          "schema": [
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "stage",
+              "displayName": "stage",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "employee",
+              "displayName": "employee",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "error",
+              "displayName": "error",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "executionId",
+              "displayName": "executionId",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "required": false,
+              "display": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0d6db6f9-eb4f-45df-a319-dfbf5e20a306",
+      "name": "Log AI Failure (Dead-Letter)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -160,
+        2096
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleSheetsOAuth2Api credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "it team alerts",
+          "mode": "name"
+        },
+        "text": "=:rotating_light: Onboarding AI analysis failed for *{{ $(\"Validate Onboarding Data\").item.json.fullName }}* ({{ $(\"Validate Onboarding Data\").item.json.personalEmail }}). Logged to dead-letter queue. Execution: {{ $execution.id }}",
+        "otherOptions": {}
+      },
+      "id": "f081304b-3fec-4852-aa43-3f2e3331cdd8",
+      "name": "Alert IT (AI Failure)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.5,
+      "position": [
+        80,
+        2112
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR slackApi credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "d580c616-2f0b-497f-ae3e-270e9697401d",
+      "name": "Daily Follow-up Dispatcher",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -1568,
+        2336
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_RESOURCE_ID",
+          "mode": "list",
+          "cachedResultName": "Employee Onboarding Workbook",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1502537481,
+          "mode": "list",
+          "cachedResultName": "Follow_Ups",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit#gid=1502537481"
+        },
+        "options": {}
+      },
+      "id": "9c12be6c-e5d2-4c41-becc-d717c1f8c63d",
+      "name": "Read Pending Follow-ups",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -1344,
+        2336
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleSheetsOAuth2Api credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(i => i.json).filter(r => r && Object.keys(r).length > 0);\nconst today = new Date(); today.setHours(23,59,59,999);\nconst due = rows.filter(function(r){\n  if (!r.dueDate || String(r.status).toLowerCase() !== 'pending') return false;\n  const d = new Date(r.dueDate);\n  return !isNaN(d.getTime()) && d <= today;\n});\nreturn due.map(function(r){ return { json: r }; });"
+      },
+      "id": "203c7c30-05ba-4791-a3f8-4e8e0e388d55",
+      "name": "Filter Due Follow-ups",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1120,
+        2336
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "you@example.com",
+        "subject": "=[{{ $json.milestone }}] {{ $json.followUpType }} — {{ $json.employee }}",
+        "message": "=<p>{{ $json.message }}</p><p><i>Onboarding milestone: {{ $json.milestone }} ({{ $json.followUpType }})</i></p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "4c3d91a1-940b-44b0-b240-2f061fbf3061",
+      "name": "Send Follow-up Message",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -896,
+        2336
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR gmailOAuth2 credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7
+            }
+          ]
+        }
+      },
+      "id": "8b3242a9-b29a-4da5-b53f-5276bf29ceab",
+      "name": "Daily Executive Dashboard",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -1568,
+        2656
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_RESOURCE_ID",
+          "mode": "list",
+          "cachedResultName": "Employee Onboarding Workbook",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Onboarding_Tracker",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit#gid=0"
+        },
+        "options": {}
+      },
+      "id": "40a8c506-619d-48a5-96a9-1cb75cfe0c0b",
+      "name": "Read Onboarding Tracker",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -1344,
+        2656
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleSheetsOAuth2Api credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(i => i.json).filter(r => r && Object.keys(r).length > 0);\nconst total = rows.length;\nfunction pct(field, done){ if(!total) return 0; const n = rows.filter(r => String(r[field]||'').toLowerCase() === done).length; return Math.round((n/total)*100); }\nconst completed = rows.filter(r => String(r.status||'').toLowerCase() === 'completed').length;\nconst pending = total - completed;\n\n// Average onboarding time (createdAt -> startDate) in days\nlet sumDays = 0, cnt = 0;\nrows.forEach(function(r){ const a = new Date(r.createdAt), b = new Date(r.startDate); if(!isNaN(a)&&!isNaN(b)){ sumDays += Math.abs((b-a)/86400000); cnt++; } });\nconst avgDays = cnt ? Math.round(sumDays/cnt) : 0;\n\n// Department stats\nconst byDept = {};\nrows.forEach(function(r){ const d = r.department || 'Unknown'; byDept[d] = (byDept[d]||0)+1; });\nconst deptStats = Object.keys(byDept).map(function(k){ return k + ': ' + byDept[k]; }).join(', ');\n\nreturn [{ json: {\n  reportDate: $now.toFormat('yyyy-MM-dd'),\n  employeesOnboarded: total,\n  completed: completed,\n  pendingTasks: pending,\n  itCompletionRate: pct('itStatus','done'),\n  hrCompletionRate: pct('documentStatus','done'),\n  trainingCompletionRate: pct('trainingStatus','done'),\n  accountCompletionRate: pct('accountStatus','done'),\n  complianceStatus: pct('managerApproval','approved') + '% approved',\n  avgOnboardingDays: avgDays,\n  departmentStats: deptStats,\n} }];"
+      },
+      "id": "aabc4314-ff89-44b1-88e3-3a3e0b557f85",
+      "name": "Aggregate Dashboard Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1120,
+        2656
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_RESOURCE_ID",
+          "mode": "list",
+          "cachedResultName": "Employee Onboarding Workbook",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1212048788,
+          "mode": "list",
+          "cachedResultName": "Executive_Dashboard",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit#gid=1212048788"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "reportDate",
+              "displayName": "reportDate",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "employeesOnboarded",
+              "displayName": "employeesOnboarded",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "completed",
+              "displayName": "completed",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "pendingTasks",
+              "displayName": "pendingTasks",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "itCompletionRate",
+              "displayName": "itCompletionRate",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "hrCompletionRate",
+              "displayName": "hrCompletionRate",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "trainingCompletionRate",
+              "displayName": "trainingCompletionRate",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "accountCompletionRate",
+              "displayName": "accountCompletionRate",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "complianceStatus",
+              "displayName": "complianceStatus",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "avgOnboardingDays",
+              "displayName": "avgOnboardingDays",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "departmentStats",
+              "displayName": "departmentStats",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "eaab0ade-beef-4d36-8d13-96161f4be39f",
+      "name": "Append Dashboard Snapshot",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -896,
+        2560
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleSheetsOAuth2Api credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "hr and welcome alerts",
+          "mode": "name"
+        },
+        "text": "=:bar_chart: *Onboarding Executive Dashboard — {{ $json.reportDate }}*\n• Employees onboarded: *{{ $json.employeesOnboarded }}* ({{ $json.completed }} completed, {{ $json.pendingTasks }} pending)\n• IT completion: *{{ $json.itCompletionRate }}%*  |  HR docs: *{{ $json.hrCompletionRate }}%*\n• Training: *{{ $json.trainingCompletionRate }}%*  |  Accounts: *{{ $json.accountCompletionRate }}%*\n• Compliance: {{ $json.complianceStatus }}\n• Avg onboarding time: *{{ $json.avgOnboardingDays }} days*\n• By department: {{ $json.departmentStats }}",
+        "otherOptions": {}
+      },
+      "id": "6cf203a8-ac6e-4ade-a36e-15249b03e015",
+      "name": "Post Dashboard to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.5,
+      "position": [
+        -896,
+        2752
+      ],
+      "executeOnce": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR slackApi credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "onboarding-status-update",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -336,
+        2320
+      ],
+      "id": "bd220ff1-caea-482a-b11b-fd37b77949cf",
+      "name": "Status Update (Webhook)",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR httpHeaderAuth credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json || {};\nconst body = raw.body || raw;\n\nconst ALLOWED_FIELDS = ['accountStatus','itStatus','documentStatus','trainingStatus','managerApproval'];\nconst ALLOWED_VALUES = ['Pending','In Progress','Completed','Approved','Rejected','Blocked'];\n\nconst employeeId = String(body.employeeId || '').trim();\nconst field = String(body.field || '').trim();\nconst value = String(body.value || '').trim();\n\nconst errors = [];\nif (!employeeId) errors.push('Missing employeeId');\nif (!ALLOWED_FIELDS.includes(field)) errors.push('field must be one of: ' + ALLOWED_FIELDS.join(', '));\nif (!ALLOWED_VALUES.includes(value)) errors.push('value must be one of: ' + ALLOWED_VALUES.join(', '));\n\nreturn [{ json: {\n  employeeId,\n  field,\n  value,\n  valid: errors.length === 0,\n  errors,\n  updatedAt: new Date().toISOString(),\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -128,
+        2320
+      ],
+      "id": "f19b7721-5276-4067-ad36-9e3325073d92",
+      "name": "Validate Status Update"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "status-valid-cond",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        112,
+        2320
+      ],
+      "id": "c0d9afeb-02b4-4303-972d-6989b716a77f",
+      "name": "Is Valid Update?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const e = $json;\nconst payload = { employeeId: e.employeeId };\npayload[e.field] = e.value;\nreturn [{ json: payload }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        2240
+      ],
+      "id": "9956a0e2-6a8c-44a4-8ec5-49e3e51a890d",
+      "name": "Build Update Payload"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_RESOURCE_ID",
+          "mode": "list",
+          "cachedResultName": "Employee Onboarding Workbook",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Onboarding_Tracker",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "employeeId"
+          ],
+          "schema": [
+            {
+              "id": "employeeId",
+              "displayName": "employeeId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "fullName",
+              "displayName": "fullName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "personalEmail",
+              "displayName": "personalEmail",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "jobTitle",
+              "displayName": "jobTitle",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "department",
+              "displayName": "department",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "manager",
+              "displayName": "manager",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "startDate",
+              "displayName": "startDate",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "accountStatus",
+              "displayName": "accountStatus",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "itStatus",
+              "displayName": "itStatus",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "documentStatus",
+              "displayName": "documentStatus",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "trainingStatus",
+              "displayName": "trainingStatus",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "managerApproval",
+              "displayName": "managerApproval",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "createdAt",
+              "displayName": "createdAt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        544,
+        2240
+      ],
+      "id": "98fc3f48-3326-4cd4-86a9-1436189a0649",
+      "name": "Update Onboarding Status",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleSheetsOAuth2Api credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: true, employeeId: $json.employeeId, updated: true } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.2,
+      "position": [
+        768,
+        2240
+      ],
+      "id": "723c5b48-e9c0-4d1c-93fc-bc68dfd79fa3",
+      "name": "Respond Success"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: false, errors: $json.errors } }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.2,
+      "position": [
+        320,
+        2416
+      ],
+      "id": "7d63ec25-ed69-4856-b0e8-0098ba8794e0",
+      "name": "Respond Invalid"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Employee profile:\nName: {{ $json.fullName }}\nJob title: {{ $json.jobTitle }}\nDepartment: {{ $json.department }}\nTeam: {{ $json.team }}\nEmployment type: {{ $json.employmentType }}\nOffice location: {{ $json.officeLocation }}\nStart date: {{ $json.startDate }}\nManager: {{ $json.manager }}\nStated equipment needs: {{ $json.equipment }}\n\nGenerate: personalized onboarding summary, an onboarding checklist, a suggested training path, equipment recommendations, department-specific resources, and a warm welcome message.",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "=You are an HR onboarding specialist. Given an employee profile, produce a personalized onboarding plan. Return ONLY structured data matching the provided JSON schema. Be concrete and role/department-specific."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -448,
+        1440
+      ],
+      "id": "238f3f3d-ac06-4052-bab9-6a3be89aacba",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"additionalProperties\": false,\n  \"properties\": {\n    \"onboarding_summary\": {\"type\": \"string\"},\n    \"welcome_message\": {\"type\": \"string\"},\n    \"checklist\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}},\n    \"training_path\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}},\n    \"equipment_recommendations\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}},\n    \"department_resources\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}\n  },\n  \"required\": [\"onboarding_summary\", \"welcome_message\", \"checklist\", \"training_path\", \"equipment_recommendations\", \"department_resources\"]\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -272,
+        1616
+      ],
+      "id": "c0692aaa-ffa5-4927-bbb9-eb612a0d36ba",
+      "name": "Structured Output Parser1"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.6-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        -448,
+        1632
+      ],
+      "id": "202308e7-93f5-4266-b082-8839f1b38abf",
+      "name": "Google Gemini Chat Model1",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googlePalmApi credential"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Onboarding Intake (Webhook)": {
+      "main": [
+        [
+          {
+            "node": "Normalize & Verify Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize & Verify Request": {
+      "main": [
+        [
+          {
+            "node": "Lookup Existing Employees",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Existing Employees": {
+      "main": [
+        [
+          {
+            "node": "Validate Onboarding Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Onboarding Data": {
+      "main": [
+        [
+          {
+            "node": "Is Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Valid?": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify HR (Validation Failed)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Validation Issue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Onboarding Plan": {
+      "main": [
+        [
+          {
+            "node": "Create HR Employee Folder",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Generate Provisioning Tasks",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify IT Team",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify Manager",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Welcome Email",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Slack Welcome Message",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Create First-Day Calendar Event",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Onboarding Record",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Training Assignments",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Write Audit Log",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Generate Follow-up Schedule",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create HR Employee Folder": {
+      "main": [
+        [
+          {
+            "node": "Log HR Document Checklist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Provisioning Tasks": {
+      "main": [
+        [
+          {
+            "node": "Log Provisioning Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Follow-up Schedule": {
+      "main": [
+        [
+          {
+            "node": "Log Follow-up Schedule",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log AI Failure (Dead-Letter)": {
+      "main": [
+        [
+          {
+            "node": "Alert IT (AI Failure)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Follow-up Dispatcher": {
+      "main": [
+        [
+          {
+            "node": "Read Pending Follow-ups",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Pending Follow-ups": {
+      "main": [
+        [
+          {
+            "node": "Filter Due Follow-ups",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Due Follow-ups": {
+      "main": [
+        [
+          {
+            "node": "Send Follow-up Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Executive Dashboard": {
+      "main": [
+        [
+          {
+            "node": "Read Onboarding Tracker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Onboarding Tracker": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Dashboard Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Dashboard Metrics": {
+      "main": [
+        [
+          {
+            "node": "Append Dashboard Snapshot",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Post Dashboard to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status Update (Webhook)": {
+      "main": [
+        [
+          {
+            "node": "Validate Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Status Update": {
+      "main": [
+        [
+          {
+            "node": "Is Valid Update?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Valid Update?": {
+      "main": [
+        [
+          {
+            "node": "Build Update Payload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Invalid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Update Payload": {
+      "main": [
+        [
+          {
+            "node": "Update Onboarding Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Onboarding Status": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser1": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Build Onboarding Plan",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log AI Failure (Dead-Letter)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "errorWorkflow": "YOUR_ERROR_WORKFLOW_ID"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "tags": []
+}

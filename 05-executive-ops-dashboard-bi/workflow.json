@@ -1,0 +1,916 @@
+{
+  "name": "Executive Operations Dashboard & BI",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "id": "59d18658-39dc-4ea4-aa89-e01444b92d0e",
+      "name": "Schedule (Hourly + Weekly)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -1792,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Central configuration. Edit thresholds here or override via webhook body.\nconst incoming = $input.first() ? $input.first().json : {};\nconst body = (incoming && incoming.body) ? incoming.body : {};\nconst thresholds = {\n  revenueDropPct: body.revenueDropPct != null ? Number(body.revenueDropPct) : 15,\n  supportBacklogMax: body.supportBacklogMax != null ? Number(body.supportBacklogMax) : 50,\n  pipelineTarget: body.pipelineTarget != null ? Number(body.pipelineTarget) : 500000,\n  cashFlowMin: body.cashFlowMin != null ? Number(body.cashFlowMin) : 20000,\n  baseCurrency: body.baseCurrency || \"USD\",\n};\nconst fx = { USD: 1, EUR: 1.08, GBP: 1.27, NGN: 0.00065, KES: 0.0078 };\nreturn [{ json: {\n  runId: $execution.id,\n  runMode: $execution.mode,\n  triggeredAt: $now.toISO(),\n  isWeekly: body.weekly != null ? Boolean(body.weekly) : ($now.weekday === 1 && $now.hour === 7),\n  thresholds,\n  fx,\n} }];"
+      },
+      "id": "be05aa3c-01ad-4b3d-a772-76bb9e720350",
+      "name": "Load Config & Thresholds",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1568,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "executive-dashboard",
+        "options": {},
+        "authentication": "headerAuth"
+      },
+      "id": "eb68f539-dd0c-46bc-ac04-c63ba9cf8c0b",
+      "name": "Webhook / API Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1792,
+        480
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR httpHeaderAuth credential"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "954a436c-21b8-4081-8292-dd0abf35ca88",
+      "name": "Manual Run",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1792,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.stripe.com/v1/charges",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "stripeApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "limit",
+              "value": "100"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "parameters": {
+                "parameters": [
+                  {
+                    "name": "starting_after",
+                    "value": "={{ $response.body.data.last().id }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.has_more === false }}",
+              "limitPagesFetched": true,
+              "maxRequests": 10
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "f8ec1ec1-3417-445e-8a18-014480e5dad0",
+      "name": "Fetch Stripe Payments",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1344,
+        192
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true,
+      "credentials": {
+        "stripeApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR stripeApi credential"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "id": "0e570348-706a-4b06-9edd-245c86c8562d",
+      "name": "Merge All Sources",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -1072,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.hubapi.com/crm/v3/objects/deals",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "limit",
+              "value": "100"
+            },
+            {
+              "name": "properties",
+              "value": "dealstage,amount,createdate,pipeline"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "129fb237-9063-4f4e-99d7-eafcfd225580",
+      "name": "Fetch HubSpot Deals & Leads",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1344,
+        384
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true,
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR hubspotAppToken credential"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "   https://your-domain.atlassian.net/rest/api/3/search/jql",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "jql",
+              "value": "updated >= -7d ORDER BY created DESC"
+            },
+            {
+              "name": "maxResults",
+              "value": "100"
+            },
+            {
+              "name": "fields",
+              "value": "status,priority,created,resolutiondate"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "6a05ab67-a2d2-4bb5-ab86-576d344895f7",
+      "name": "Fetch Jira Tickets",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1344,
+        576
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR httpHeaderAuth credential"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "   https://analyticsdata.googleapis.com/v1beta/properties/YOUR_GA4_PROPERTY_ID:runReport",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleAnalyticsOAuth2",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{ \"dateRanges\": [{ \"startDate\": \"7daysAgo\", \"endDate\": \"today\" }], \"metrics\": [{ \"name\": \"sessions\" }, { \"name\": \"conversions\" }] }",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "ef55af43-79d0-48b5-87fd-3eb30938e977",
+      "name": "Fetch Google Analytics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1344,
+        768
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleAnalyticsOAuth2": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleAnalyticsOAuth2 credential"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $(\"Load Config & Thresholds\").first().json;\nconst fx = cfg.fx || { USD: 1 };\nconst base = (cfg.thresholds && cfg.thresholds.baseCurrency) || \"USD\";\nfunction toBase(amount, cur) {\n  const c = String(cur || base).toUpperCase();\n  const rate = fx[c] != null ? fx[c] : 1;\n  const n = Number(String(amount).replace(/[^0-9.\\-]/g, \"\"));\n  return isNaN(n) ? 0 : Math.round(n * rate);\n}\nfunction safeAll(name) { try { return $(name).all().map(i => i.json).filter(Boolean); } catch (e) { return []; } }\n\n// --- Stripe (amounts are in cents) ---\nconst stripeRaw = safeAll(\"Fetch Stripe Payments\");\nconst seen = {};\nconst payments = [];\nfor (const p of stripeRaw) {\n  if (!p || !p.id || seen[p.id]) continue;\n  seen[p.id] = true;\n  if (p.status && p.status !== \"succeeded\") continue;\n  payments.push({ id: p.id, amount: toBase((Number(p.amount) || 0) / 100, p.currency), currency: base, date: p.created ? new Date(p.created * 1000).toISOString() : null });\n}\n\n// --- HubSpot deals ---\nconst dealsRaw = safeAll(\"Fetch HubSpot Deals & Leads\");\nconst deals = [];\nfor (const d of dealsRaw) {\n  const pr = d && d.properties ? d.properties : {};\n  deals.push({ id: d.id, stage: pr.dealstage || \"unknown\", amount: toBase(pr.amount || 0, base), createdate: pr.createdate || null });\n}\n\n// --- Jira tickets ---\nconst jiraRaw = safeAll(\"Fetch Jira Tickets\");\nconst tickets = [];\nfor (const t of jiraRaw) {\n  const f = t && t.fields ? t.fields : {};\n  tickets.push({ key: t.key, status: (f.status && f.status.name) || \"Unknown\", priority: (f.priority && f.priority.name) || \"None\", created: f.created || null, resolved: f.resolutiondate || null });\n}\n\n// --- Marketing / Analytics ---\nconst ga = safeAll(\"Fetch Google Analytics\")[0] || {};\n   const marketing = { sessions: Number(ga.sessions) || 0, conversions: Number(ga.conversions) || 0, leads: deals.length, adSpend: toBase(ga.adSpend || 0, base) };\n\nreturn [{ json: {\n  meta: { runId: cfg.runId, triggeredAt: cfg.triggeredAt, isWeekly: cfg.isWeekly, baseCurrency: base },\n  thresholds: cfg.thresholds,\n  dataset: { payments, deals, tickets, marketing },\n  counts: { payments: payments.length, deals: deals.length, tickets: tickets.length },\n} }];"
+      },
+      "id": "eeaa6009-8429-4daf-8a40-eaea80eae358",
+      "name": "Normalize & Consolidate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -896,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const src = $input.first().json;\nconst d = src.dataset;\nconst now = new Date();\nconst monthStart = new Date(now.getFullYear(), now.getMonth(), 1);\n\n// Sales\nconst totalRevenue = d.payments.reduce((s, p) => s + (p.amount || 0), 0);\nconst monthlyRevenue = d.payments.filter(p => p.date && new Date(p.date) >= monthStart).reduce((s, p) => s + p.amount, 0);\nconst won = d.deals.filter(x => x.stage === \"closedwon\");\nconst lost = d.deals.filter(x => x.stage === \"closedlost\");\nconst openDeals = d.deals.filter(x => x.stage !== \"closedwon\" && x.stage !== \"closedlost\");\nconst pipelineValue = openDeals.reduce((s, x) => s + (x.amount || 0), 0);\nconst closedDeals = won.length;\nconst winRate = (won.length + lost.length) > 0 ? Math.round((won.length / (won.length + lost.length)) * 100) : 0;\n\n// Marketing\nconst leads = d.marketing.leads;\nconst costPerLead = leads > 0 ? Math.round(d.marketing.adSpend / leads) : 0;\nconst conversionRate = d.marketing.sessions > 0 ? Math.round((d.marketing.conversions / d.marketing.sessions) * 1000) / 10 : 0;\n\n// Operations / Support\nconst openTickets = d.tickets.filter(t => t.status !== \"Done\" && t.status !== \"Closed\");\nconst resolved = d.tickets.filter(t => t.resolved);\nlet avgResolutionHrs = 0;\nif (resolved.length) {\n  const totalHrs = resolved.reduce((s, t) => s + ((new Date(t.resolved) - new Date(t.created)) / 3600000), 0);\n  avgResolutionHrs = Math.round(totalHrs / resolved.length);\n}\nconst escalations = d.tickets.filter(t => t.priority === \"Critical\" || t.priority === \"High\").length;\nconst escalationRate = d.tickets.length ? Math.round((escalations / d.tickets.length) * 100) : 0;\n\n// Finance (illustrative from available signals)\nconst monthlyExpenses = d.marketing.adSpend;\nconst cashFlow = monthlyRevenue - monthlyExpenses;\nconst profitMargin = monthlyRevenue > 0 ? Math.round((cashFlow / monthlyRevenue) * 100) : 0;\n\nconst kpis = {\n  sales: { totalRevenue, monthlyRevenue, pipelineValue, closedDeals, winRate },\n  marketing: { leads, costPerLead, conversionRate, sessions: d.marketing.sessions },\n  operations: { activeProjects: openDeals.length, openTickets: openTickets.length, workflowSuccessRate: 100 },\n  finance: { outstandingInvoices: pipelineValue, cashFlow, monthlyExpenses, profitMargin },\n  support: { openTickets: openTickets.length, avgResolutionHrs, escalationRate, escalations },\n};\nreturn [{ json: { meta: src.meta, thresholds: src.thresholds, counts: src.counts, kpis } }];"
+      },
+      "id": "fa104713-93b6-466e-828c-82acff88bd0d",
+      "name": "Calculate KPIs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const kpiItem = $(\"Calculate KPIs\").first().json;\nconst kpis = kpiItem.kpis;\nconst th = kpiItem.thresholds || {};\nconst meta = kpiItem.meta;\n// AI structured output (json_schema => already an object)\n   let ai = {};\n   try {\n     const msg = ($json.output || []).find(o => o.type === \"message\");\n     ai = msg.content[0].text;\n   } catch (e) { ai = {}; }\nif (typeof ai === \"string\") { try { ai = JSON.parse(ai); } catch (e) { ai = {}; } }\n\nconst alerts = [];\nif (kpis.support.openTickets > (th.supportBacklogMax || 50)) {\n  alerts.push({ severity: \"high\", area: \"Operations\", audience: \"Operations Manager\", message: \"Support backlog \" + kpis.support.openTickets + \" exceeds threshold \" + (th.supportBacklogMax || 50) });\n}\nif (kpis.sales.pipelineValue < (th.pipelineTarget || 500000)) {\n  alerts.push({ severity: \"high\", area: \"Sales\", audience: \"Sales Leadership\", message: \"Pipeline \" + kpis.sales.pipelineValue + \" below target \" + (th.pipelineTarget || 500000) });\n}\nif (kpis.finance.cashFlow < (th.cashFlowMin || 20000)) {\n  alerts.push({ severity: \"critical\", area: \"Finance\", audience: \"Finance\", message: \"Cash flow \" + kpis.finance.cashFlow + \" below minimum \" + (th.cashFlowMin || 20000) });\n}\nif (kpis.support.escalationRate > 30) {\n  alerts.push({ severity: \"medium\", area: \"Support\", audience: \"Support Lead\", message: \"Escalation rate \" + kpis.support.escalationRate + \"% is elevated\" });\n}\n\nreturn [{ json: {\n  meta, thresholds: th, kpis, ai,\n  alerts,\n  hasHighPriority: alerts.some(a => a.severity === \"high\" || a.severity === \"critical\"),\n  generatedAt: $now.toISO(),\n} }];"
+      },
+      "id": "fd1a0f57-85fb-4fdd-8055-bad935ebdd92",
+      "name": "Alert Engine",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -176,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO executive_reports (run_id, generated_at, kpis, ai_insights, alerts) VALUES ($1, $2, $3, $4, $5)",
+        "options": {
+          "queryReplacement": "={{ $json.meta.runId }},{{ $json.generatedAt }},{{ JSON.stringify($json.kpis) }},{{ JSON.stringify($json.ai) }},{{ JSON.stringify($json.alerts) }}"
+        }
+      },
+      "id": "aade0ccd-3638-43f0-88b2-e402edbbcf18",
+      "name": "Store Report History (Postgres)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        0,
+        0
+      ],
+      "executeOnce": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR postgres credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (run_id, event, alert_count, created_at) VALUES ($1, $2, $3, $4)",
+        "options": {
+          "queryReplacement": "={{ $json.meta.runId }},bi_run_completed,{{ $json.alerts.length }},{{ $json.generatedAt }}"
+        }
+      },
+      "id": "38767487-a19b-403b-ba25-d5c60c02c0ac",
+      "name": "Write Audit Log (Postgres)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        0,
+        192
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR postgres credential"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const s = $input.first().json;\nconst k = s.kpis;\nconst dashboards = {\n  sales: k.sales,\n  marketing: k.marketing,\n  finance: k.finance,\n  operations: k.operations,\n  support: k.support,\n  companyOverview: {\n    revenue: k.sales.totalRevenue,\n    pipeline: k.sales.pipelineValue,\n    cashFlow: k.finance.cashFlow,\n    openTickets: k.support.openTickets,\n    leads: k.marketing.leads,\n    alerts: s.alerts.length,\n    generatedAt: s.generatedAt,\n  },\n};\nreturn [{ json: { runId: s.meta.runId, generatedAt: s.generatedAt, dashboards } }];"
+      },
+      "id": "15a3eaea-a39c-4737-881c-6d5010252d51",
+      "name": "Prepare Dashboard Datasets",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        384
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "sendTo": "you@example.com",
+        "subject": "=Executive BI Summary - {{ $json.generatedAt }}",
+        "message": "=<h2>Executive Summary</h2><p>{{ $json.ai.executive_summary }}</p><p><strong>Revenue:</strong> {{ $json.kpis.sales.totalRevenue }} | <strong>Pipeline:</strong> {{ $json.kpis.sales.pipelineValue }} | <strong>Cash Flow:</strong> {{ $json.kpis.finance.cashFlow }} | <strong>Open Tickets:</strong> {{ $json.kpis.support.openTickets }}</p><p><strong>Active alerts:</strong> {{ $json.alerts.length }}</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "151bbf8d-7858-4dc6-8e72-8f6bf3ca9b9e",
+      "name": "Email Executive Summary",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        272,
+        544
+      ],
+      "executeOnce": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR gmailOAuth2 credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const s = $input.first().json;\nconst k = s.kpis;\nconst ai = s.ai || {};\nconst LF = String.fromCharCode(10);\nfunction list(arr) {\n  if (!arr || !arr.length) return \"<li>None</li>\";\n  return arr.map(x => \"<li>\" + x + \"</li>\").join(LF);\n}\nconst rows = [\n  \"<h1>Executive Business Report</h1>\",\n  \"<p><em>Generated \" + s.generatedAt + \"</em></p>\",\n  \"<h2>Executive Summary</h2><p>\" + (ai.executive_summary || \"N/A\") + \"</p>\",\n  \"<h2>KPI Overview</h2>\",\n  \"<ul>\",\n  \"<li>Total Revenue: \" + k.sales.totalRevenue + \"</li>\",\n  \"<li>Monthly Revenue: \" + k.sales.monthlyRevenue + \"</li>\",\n  \"<li>Pipeline Value: \" + k.sales.pipelineValue + \"</li>\",\n  \"<li>Win Rate: \" + k.sales.winRate + \"%</li>\",\n  \"<li>Leads: \" + k.marketing.leads + \" | Cost/Lead: \" + k.marketing.costPerLead + \"</li>\",\n  \"<li>Cash Flow: \" + k.finance.cashFlow + \" | Profit Margin: \" + k.finance.profitMargin + \"%</li>\",\n  \"<li>Open Tickets: \" + k.support.openTickets + \" | Escalation Rate: \" + k.support.escalationRate + \"%</li>\",\n  \"</ul>\",\n  \"<h2>Performance Analysis</h2><p>\" + (ai.performance_analysis || \"N/A\") + \"</p>\",\n  \"<h2>Major Risks</h2><ul>\" + list(ai.risks) + \"</ul>\",\n  \"<h2>Opportunities</h2><ul>\" + list(ai.opportunities) + \"</ul>\",\n  \"<h2>Action Items</h2><ul>\" + list(ai.recommended_actions) + \"</ul>\",\n  \"<h2>AI Recommendations & Bottlenecks</h2><ul>\" + list(ai.bottlenecks) + \"</ul>\",\n  \"<h2>Active Alerts</h2><ul>\" + list(s.alerts.map(a => a.severity.toUpperCase() + \" - \" + a.area + \": \" + a.message)) + \"</ul>\",\n];\nconst reportHtml = \"<div style=\\\"font-family:Arial,sans-serif\\\">\" + rows.join(LF) + \"</div>\";\nreturn [{ json: { runId: s.meta.runId, subject: \"Weekly Executive Report - \" + s.generatedAt, reportHtml } }];"
+      },
+      "id": "bcfe0cf7-2462-412d-a600-50155d3677ce",
+      "name": "Build Weekly Report (HTML)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        304,
+        736
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "sendTo": "you@example.com",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.reportHtml }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "71272df2-61d6-4bed-8bc4-5de3377cf2dc",
+      "name": "Email Weekly Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        544,
+        688
+      ],
+      "executeOnce": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR gmailOAuth2 credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "hasHigh",
+              "leftValue": "={{ $json.hasHighPriority }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "693dde2c-3d43-415c-95e8-53328ce9a517",
+      "name": "High-Priority Alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        0,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const s = $input.first().json;\nconst LF = String.fromCharCode(10);\nconst lines = s.alerts.map(a => \"*\" + a.severity.toUpperCase() + \"* [\" + a.area + \" -> \" + a.audience + \"] \" + a.message);\nconst text = \":rotating_light: *Executive Alerts* (\" + s.alerts.length + \")\" + LF + lines.join(LF);\nreturn [{ json: { text, alerts: s.alerts, kpis: s.kpis, ai: s.ai, generatedAt: s.generatedAt } }];"
+      },
+      "id": "e313b094-5829-43c4-9164-583cd6eabf5b",
+      "name": "Format Alert Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        960
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "executive alerts",
+          "mode": "name"
+        },
+        "text": "={{ $json.text }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "id": "49706029-b8fb-406e-ae8d-16d9e2ab1a08",
+      "name": "Notify Executives (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.5,
+      "position": [
+        448,
+        864
+      ],
+      "executeOnce": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR slackApi credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "you@example.com",
+        "subject": "=[ACTION REQUIRED] {{ $json.alerts.length }} executive alert(s)",
+        "message": "=<h2>High-Priority Business Alerts</h2><pre>{{ $json.text }}</pre>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "fe90858d-7171-4752-bb4f-c184717672b8",
+      "name": "Email Alert to Owners",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        1056
+      ],
+      "executeOnce": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR gmailOAuth2 credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "ae4bc45b-6eea-4ddf-b977-4403c5dd8e79",
+              "leftValue": "={{ $json.meta.isWeekly }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        48,
+        768
+      ],
+      "id": "20d17839-ec3e-4eea-9936-c646156cf0cb",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Analyze these business KPIs and return structured JSON insights.\nBase currency: {{ $json.meta.baseCurrency }}\nKPIs: {{ JSON.stringify($json.kpis) }}",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "type": "AIMessagePromptTemplate",
+              "message": "You are the Chief of Staff BI analyst for an executive team. Analyze the KPI data and produce concise, decision-ready insights. Return ONLY structured JSON matching the schema."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        -496,
+        480
+      ],
+      "id": "a49a1361-6462-4518-aac7-872950d4276f",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.6-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        -496,
+        656
+      ],
+      "id": "a103d48a-ad6a-432b-9697-fb452f4f24c9",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googlePalmApi credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\"type\":\"object\",\"properties\":{\"executive_summary\":{\"type\":\"string\"},\"performance_analysis\":{\"type\":\"string\"},\"trends\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"risks\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"opportunities\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"recommended_actions\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"bottlenecks\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"weekly_report\":{\"type\":\"string\"}},\"required\":[\"executive_summary\",\"performance_analysis\",\"trends\",\"risks\",\"opportunities\",\"recommended_actions\",\"bottlenecks\",\"weekly_report\"],\"additionalProperties\":false}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -336,
+        688
+      ],
+      "id": "5370e73f-3dd4-4949-8bd8-a6180f28d110",
+      "name": "Structured Output Parser"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule (Hourly + Weekly)": {
+      "main": [
+        [
+          {
+            "node": "Load Config & Thresholds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Config & Thresholds": {
+      "main": [
+        [
+          {
+            "node": "Fetch Stripe Payments",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch HubSpot Deals & Leads",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Jira Tickets",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Google Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook / API Trigger": {
+      "main": [
+        [
+          {
+            "node": "Load Config & Thresholds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Run": {
+      "main": [
+        [
+          {
+            "node": "Load Config & Thresholds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Stripe Payments": {
+      "main": [
+        [
+          {
+            "node": "Merge All Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge All Sources": {
+      "main": [
+        [
+          {
+            "node": "Normalize & Consolidate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch HubSpot Deals & Leads": {
+      "main": [
+        [
+          {
+            "node": "Merge All Sources",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Fetch Jira Tickets": {
+      "main": [
+        [
+          {
+            "node": "Merge All Sources",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Fetch Google Analytics": {
+      "main": [
+        [
+          {
+            "node": "Merge All Sources",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Normalize & Consolidate": {
+      "main": [
+        [
+          {
+            "node": "Calculate KPIs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate KPIs": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Engine": {
+      "main": [
+        [
+          {
+            "node": "Store Report History (Postgres)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Write Audit Log (Postgres)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare Dashboard Datasets",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email Executive Summary",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "High-Priority Alerts?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Weekly Report (HTML)": {
+      "main": [
+        [
+          {
+            "node": "Email Weekly Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "High-Priority Alerts?": {
+      "main": [
+        [
+          {
+            "node": "Format Alert Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Alert Message": {
+      "main": [
+        [
+          {
+            "node": "Notify Executives (Slack)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email Alert to Owners",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Build Weekly Report (HTML)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Alert Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "errorWorkflow": "YOUR_ERROR_WORKFLOW_ID"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "tags": []
+}

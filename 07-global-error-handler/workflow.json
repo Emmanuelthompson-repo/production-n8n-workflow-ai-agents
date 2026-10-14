@@ -1,0 +1,492 @@
+{
+  "name": "Global Error & Dead-Letter Handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "05e7d2ee-20bb-4a1c-ae5e-ce6f44329d42",
+      "name": "On Any Workflow Error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1200,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== CONFIG (edit here) =====\nconst CONFIG = {\n  alertEmail: 'you@example.com',\n  criticalWorkflows: /invoice|payment|finance|stripe|billing|onboarding|lead|support/i,\n  transient: /429|rate.?limit|timeout|timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|socket hang up|\\b50[234]\\b|temporar|overloaded/i,\n  auth: /\\b401\\b|\\b403\\b|unauthori[sz]ed|forbidden|invalid.*(token|credential|api.?key)|expired|permission|not authori[sz]ed/i,\n};\nconst item = $input.first().json || {};\nconst ex = item.execution || {};\nconst trig = item.trigger || {};\nconst wf = item.workflow || {};\nconst err = ex.error || trig.error || {};\nconst message = String(err.message || 'Unknown error').slice(0, 1000);\nconst failedNode = (err.node && err.node.name) || ex.lastNodeExecuted || 'unknown';\nconst isTriggerFailure = !!trig.error; // the trigger itself failed (not just a run that was started by a trigger)\nconst mode = isTriggerFailure ? 'trigger-failure' : (ex.mode || 'execution');\nconst workflowName = wf.name || 'unknown workflow';\n\nlet errorClass = 'unknown';\nif (CONFIG.auth.test(message)) errorClass = 'auth';\nelse if (CONFIG.transient.test(message)) errorClass = 'transient';\nelse if (/validation|invalid|required|missing|schema|parse|JSON/i.test(message)) errorClass = 'data';\n\nlet severity = 'high';\nif (errorClass === 'transient') severity = 'medium';\nif (CONFIG.criticalWorkflows.test(workflowName) && errorClass !== 'transient') severity = 'critical';\nif (isTriggerFailure) severity = 'critical'; // a dead trigger means the workflow is not listening at all\n\nconst executionId = String(ex.id || '');\nconst fingerprint = workflowName + '|' + failedNode + '|' + message.slice(0, 120);\nconst stack = String(err.stack || '').slice(0, 1500);\nconst payload = JSON.stringify({\n  workflow_id: wf.id || null, failed_node: failedNode, error_class: errorClass, mode,\n  execution_url: ex.url || null, retry_of: ex.retryOf || null, stack, error: err,\n}).slice(0, 8000);\n\nreturn [{ json: {\n  event_type: 'error',\n  source_workflow: workflowName,\n  workflow_id: wf.id || '',\n  failed_node: failedNode,\n  error_message: message,\n  error_class: errorClass,\n  severity,\n  mode,\n  timestamp: $now.toISO(),\n  execution_id: executionId,\n  execution_url: ex.url || '',\n  fingerprint,\n  stack,\n  payload_json: payload,\n  channel: 'n8n',\n  alert_email: CONFIG.alertEmail,\n} }];"
+      },
+      "id": "aff659e0-dc35-406f-9588-fef6463fbbfd",
+      "name": "Normalize & Classify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -960,
+        100
+      ],
+      "notes": "Handles both execution errors and trigger errors. Classifies error type and severity. Config lives at the top of this node."
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "value": "YOUR_RESOURCE_ID",
+          "mode": "list",
+          "cachedResultName": "support_audit_log",
+          "cachedResultUrl": "/projects/YOUR_PROJECT/datatables/YOUR_TABLE"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "event_type": "error",
+            "source_workflow": "={{ $json.source_workflow }}",
+            "conversation_id": "={{ $json.conversation_id }}",
+            "channel": "={{ $json.channel }}",
+            "severity": "high",
+            "message": "={{ $json.error_message }}",
+            "payload_json": "={{ $json.payload_json }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "event_type",
+              "displayName": "event_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "source_workflow",
+              "displayName": "source_workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "conversation_id",
+              "displayName": "conversation_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "channel",
+              "displayName": "channel",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "severity",
+              "displayName": "severity",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "payload_json",
+              "displayName": "payload_json",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_date",
+              "displayName": "created_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "date",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "d7033196-f259-43b7-9f93-abe64a755b77",
+      "name": "Write Dead-Letter Audit Row",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -720,
+        100
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "Dead-letter row is ALWAYS written first. If the write fails the flow continues and the alert says the audit write failed."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Always keep the audit row (written upstream). Only de-duplicate the ALERTS, so an error storm cannot flood Slack/email.\nconst j = $('Normalize & Classify').first().json;\nconst auditFailed = !!(($input.first() || {}).json && $input.first().json.error);\nconst store = $getWorkflowStaticData('global');\nstore.seen = store.seen || {};\nconst now = Date.now();\nconst WINDOW_MS = 15 * 60 * 1000;      // identical error: alert at most once per 15 minutes\nconst KEEP_MS = 6 * 60 * 60 * 1000;    // forget fingerprints after 6 hours\nfor (const k of Object.keys(store.seen)) { if (now - store.seen[k].t > KEEP_MS) delete store.seen[k]; }\nconst prev = store.seen[j.fingerprint];\nlet shouldAlert = true; let suppressed = 0;\nif (prev && now - prev.t < WINDOW_MS) { prev.count = (prev.count || 1) + 1; shouldAlert = false; }\nelse { suppressed = prev ? Math.max((prev.count || 1) - 1, 0) : 0; store.seen[j.fingerprint] = { t: now, count: 1 }; }\nreturn [{ json: { ...j, audit_failed: auditFailed, should_alert: shouldAlert, suppressed_since_last: suppressed } }];"
+      },
+      "id": "1943094e-0400-4775-8121-04fb66fe0348",
+      "name": "Throttle & Decide",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        100
+      ],
+      "notes": "De-duplicates ALERTS (not audit rows): same workflow+node+message alerts once per 15 min. Static data only persists on real executions, not manual test runs."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c16f996c-f29d-4def-b660-5e9491fe6966",
+              "leftValue": "={{ $json.should_alert }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7261480a-a61b-4078-972b-1a95cbfa3649",
+      "name": "Should Alert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -240,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Diagnose this n8n workflow failure.\n\nWorkflow: {{ $json.source_workflow }}\nFailed node: {{ $json.failed_node }}\nError class (heuristic): {{ $json.error_class }}\nMode: {{ $json.mode }}\nError message: {{ $json.error_message }}\nStack (truncated): {{ $json.stack }}\n\nGive the likely cause, the first fix to try, whether re-running is safe, the business impact, and your confidence.",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are a senior n8n reliability engineer. Base every statement only on the error details provided. Never invent causes. If the evidence is thin, say so and set confidence to low. Be concise and actionable. Mark retry_safe true only when re-running cannot create duplicates or double side effects."
+        }
+      },
+      "id": "cbd942c2-70bf-4448-a6ca-b58889bc2eae",
+      "name": "AI Triage",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        0,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "executeOnce": true,
+      "notes": "Optional intelligence layer. If it fails the alert still goes out without triage."
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.6-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        -16,
+        240
+      ],
+      "id": "47af757e-5c33-44c2-a1c6-dd7c39bba22d",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googlePalmApi credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\"type\": \"object\", \"properties\": {\"likely_cause\": {\"type\": \"string\", \"description\": \"Most probable root cause in one or two sentences\"}, \"first_fix\": {\"type\": \"string\", \"description\": \"The first concrete thing to check or change\"}, \"retry_safe\": {\"type\": \"boolean\", \"description\": \"True only if re-running the execution cannot cause duplicates or double side effects\"}, \"business_impact\": {\"type\": \"string\", \"description\": \"What this failure likely means for the business or customer\"}, \"confidence\": {\"type\": \"string\", \"enum\": [\"low\", \"medium\", \"high\"]}}, \"required\": [\"likely_cause\", \"first_fix\", \"retry_safe\", \"business_impact\", \"confidence\"], \"additionalProperties\": false}"
+      },
+      "id": "82752a24-adf4-4718-b4db-e29c12ef43b4",
+      "name": "Triage Schema",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        160,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $('Throttle & Decide').first().json;\nconst ai = ($json && $json.output && typeof $json.output === 'object') ? $json.output : null;\nconst icon = { critical: ':rotating_light:', high: ':warning:', medium: ':large_yellow_circle:' }[j.severity] || ':warning:';\nconst L = [];\nL.push(icon + ' *' + j.severity.toUpperCase() + ' workflow error*');\nL.push('*Workflow:* ' + j.source_workflow);\nL.push('*Failed node:* ' + j.failed_node + '   *Class:* ' + j.error_class + '   *Mode:* ' + j.mode);\nL.push('*Error:* ' + j.error_message);\nL.push('*Time:* ' + j.timestamp);\nif (j.execution_url) L.push('*Execution:* ' + j.execution_url);\nif (j.suppressed_since_last > 0) L.push('_' + j.suppressed_since_last + ' identical error(s) suppressed since the last alert_');\nif (j.audit_failed) L.push(':no_entry: *Audit row could NOT be written, check the data table*');\nif (ai) {\n  L.push('');\n  L.push('*AI triage* (confidence: ' + ai.confidence + ')');\n  L.push('*Likely cause:* ' + ai.likely_cause);\n  L.push('*First fix to try:* ' + ai.first_fix);\n  L.push('*Safe to retry:* ' + (ai.retry_safe ? 'yes' : 'no') + '   *Impact:* ' + ai.business_impact);\n}\nconst slackText = L.join('\\n');\nconst emailBody = slackText.replace(/\\*/g, '').replace(/_/g, '').replace(/:[a-z_]+:/g, '').trim() + '\\n\\nThe full payload is stored as a dead-letter record in the audit table.';\nreturn [{ json: { ...j, slack_text: slackText, email_subject: '[' + j.severity.toUpperCase() + '] n8n error: ' + j.source_workflow + ' / ' + j.failed_node, email_body: emailBody, send_email: (j.severity === 'critical' || j.severity === 'high') } }];"
+      },
+      "id": "9dbb2e6c-acc5-4616-a1ca-285e9e44415b",
+      "name": "Build Alert Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "support-alerts",
+          "mode": "name"
+        },
+        "text": "={{ $json.slack_text }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "id": "06efe166-4f65-4bde-941f-be2928362b07",
+      "name": "Alert Slack Channel",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.5,
+      "position": [
+        540,
+        0
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR slackApi credential"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "960e929b-1715-4be5-ab0b-0970cff5a450",
+              "leftValue": "={{ $json.send_email }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "6a2837b6-05c8-46f0-abe3-7cf25503d06e",
+      "name": "Send Email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        540,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.alert_email }}",
+        "subject": "={{ $json.email_subject }}",
+        "emailType": "text",
+        "message": "={{ $json.email_body }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "8d4b4592-ce8c-4fc5-b03b-ecf4b817ae3d",
+      "name": "Email Support Ops",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        780,
+        200
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR gmailOAuth2 credential"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "## Global Error & Dead-Letter Handler (v2)\nSet this as the **Error Workflow** of every production workflow (Settings > Error Workflow).\n\n1. Normalize + classify (error class, severity, trigger vs execution errors)\n2. ALWAYS write the dead-letter audit row first\n3. De-duplicate alerts (15 min window) so an error storm cannot flood you\n4. AI triage (optional, never blocks the alert)\n5. Slack for every alert; email for critical/high\n\nEdit alert email and severity rules at the top of 'Normalize & Classify'.",
+        "height": 300,
+        "width": 520
+      },
+      "id": "fc6fbb35-ab22-486b-86e0-d7e798ea4041",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -960,
+        260
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "On Any Workflow Error": {
+      "main": [
+        [
+          {
+            "node": "Normalize & Classify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize & Classify": {
+      "main": [
+        [
+          {
+            "node": "Write Dead-Letter Audit Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Dead-Letter Audit Row": {
+      "main": [
+        [
+          {
+            "node": "Throttle & Decide",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Throttle & Decide": {
+      "main": [
+        [
+          {
+            "node": "Should Alert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Alert?": {
+      "main": [
+        [
+          {
+            "node": "AI Triage",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "AI Triage": {
+      "main": [
+        [
+          {
+            "node": "Build Alert Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Triage",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Triage Schema": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Triage",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Alert Message": {
+      "main": [
+        [
+          {
+            "node": "Alert Slack Channel",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Email?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email?": {
+      "main": [
+        [
+          {
+            "node": "Email Support Ops",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "tags": []
+}

@@ -1,0 +1,1145 @@
+{
+  "name": "AI Customer Support & Knowledge Assistant",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {
+          "allowFileUploads": true,
+          "allowedFilesMimeTypes": "image/*,application/pdf",
+          "responseMode": "responseNodes"
+        }
+      },
+      "id": "47e92b28-ebf8-483d-84c5-05dbc55cf1a6",
+      "name": "Website Chat Trigger",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -3520,
+        384
+      ],
+      "notes": "Entry point (Website Chat). Provides chatInput + sessionId. Reply is delivered by the Chat response nodes downstream."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "sid",
+              "name": "session_id",
+              "value": "={{ $json.sessionId || $json.session_id || $execution.id }}",
+              "type": "string"
+            },
+            {
+              "id": "msg",
+              "name": "customer_message",
+              "value": "={{ $json.chatInput || $json.message || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "chn",
+              "name": "channel",
+              "value": "website_chat",
+              "type": "string"
+            },
+            {
+              "id": "nam",
+              "name": "customer_name",
+              "value": "={{ $json.name || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "eml",
+              "name": "customer_email",
+              "value": "={{ $json.email || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "phn",
+              "name": "customer_phone",
+              "value": "={{ $json.phone || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "rat",
+              "name": "received_at",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "rms",
+              "name": "received_ms",
+              "value": "={{ $now.toMillis() }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c021ff49-f5c5-4152-b45f-f3c97555974c",
+      "name": "Normalize Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        -3296,
+        384
+      ],
+      "notes": "Captures the standard support envelope (name, email, phone, channel, message, timestamp, session id) into a stable shape used by the rest of the pipeline."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const raw = ($json.customer_message || \"\").toString();\n// Sanitize: strip control characters and trim.\nconst clean = raw.replace(/[\\u0000-\\u001F\\u007F]/g, \" \").replace(/\\s+/g, \" \").trim();\nlet isValid = true;\nlet reason = \"\";\nif (!clean) { isValid = false; reason = \"empty_message\"; }\nelse if (clean.length > 4000) { isValid = false; reason = \"message_too_long\"; }\nconst urlCount = (clean.match(/https?:\\/\\//gi) || []).length;\nif (isValid && urlCount >= 5) { isValid = false; reason = \"spam_excessive_links\"; }\nconst repeated = /(.)\\1{20,}/.test(clean);\nif (isValid && repeated) { isValid = false; reason = \"spam_repeated_characters\"; }\n// Attachment validation (type only; size limits enforced by the chat widget).\nconst bin = $binary || {};\nconst files = Object.keys(bin);\nconst allowedPrefixes = [\"image/\", \"application/pdf\"];\nlet attachmentsOk = true;\nfor (const key of files) {\n  const type = (bin[key] && bin[key].mimeType) || \"\";\n  if (!allowedPrefixes.some((p) => type.indexOf(p) === 0)) { attachmentsOk = false; }\n}\nif (isValid && !attachmentsOk) { isValid = false; reason = \"unsupported_attachment\"; }\nreturn { json: { ...$json, customer_message: clean, is_valid: isValid, validation_reason: reason, attachment_count: files.length } };"
+      },
+      "id": "5c973397-9a2b-45cd-8a2a-dc859ecf2ec5",
+      "name": "Validate & Sanitize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3072,
+        384
+      ],
+      "notes": "Step 1 — rejects empty messages, spam (excessive links/repeated chars), oversized text and unsupported attachments. Also sanitizes control characters (Security: input sanitization)."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.is_valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "88f7ed36-4506-40ef-bd21-3c185b35c0ba",
+      "name": "Is Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -2848,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO customers (session_id, channel, name, email, phone, tier, account_status, created_at, last_contact)\nVALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), 'standard', 'active', NOW(), NOW())\nON CONFLICT (session_id) DO UPDATE SET\n  last_contact = NOW(),\n  name = COALESCE(customers.name, EXCLUDED.name),\n  email = COALESCE(customers.email, EXCLUDED.email),\n  phone = COALESCE(customers.phone, EXCLUDED.phone)\nRETURNING id AS customer_id, session_id, name, email, phone, tier, account_status, created_at, last_contact;",
+        "options": {
+          "queryReplacement": "={{ [$json.session_id, $json.channel, $json.customer_name, $json.customer_email, $json.customer_phone] }}"
+        }
+      },
+      "id": "64d33e79-15aa-43eb-be89-dfe0cf5d4545",
+      "name": "Identify or Create Customer",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        -2624,
+        96
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR postgres credential"
+        }
+      },
+      "notes": "Step 2 — upsert-by-session identifies an existing customer (returning id, tier, status, purchase/account fields) or creates a new profile in one atomic, injection-safe query."
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Classify this customer support message.\n\nCustomer tier: {{ $json.tier }}\nAccount status: {{ $json.account_status }}\nMessage: \"{{ $('Normalize Input').item.json.customer_message }}\"",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are a support triage classifier. Analyze the message and return intent, category, urgency, sentiment, language and a confidence score. Be precise and choose the single best category."
+        }
+      },
+      "id": "1bf29025-dd36-405a-b0d3-fe1cd4cbe16c",
+      "name": "Intent Analysis",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -2336,
+        96
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "notes": "Step 3 — structured intent/category/urgency/sentiment/language/confidence as JSON."
+    },
+    {
+      "parameters": {
+        "contextWindowLength": 12
+      },
+      "id": "57ea7b34-22fa-4c7e-8b9a-3b4a0a47c29e",
+      "name": "Intent Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.4,
+      "position": [
+        -2272,
+        320
+      ],
+      "notes": "Conversation history for the intent agent, keyed by chat session id."
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\"type\":\"object\",\"properties\":{\"intent\":{\"type\":\"string\",\"description\":\"Short summary of what the customer wants\"},\"category\":{\"type\":\"string\",\"enum\":[\"Billing\",\"Technical Support\",\"Sales\",\"Product Question\",\"Complaint\",\"Feature Request\",\"Refund\",\"General Inquiry\"]},\"urgency\":{\"type\":\"string\",\"enum\":[\"low\",\"medium\",\"high\",\"critical\"]},\"sentiment\":{\"type\":\"string\",\"enum\":[\"positive\",\"neutral\",\"negative\"]},\"language\":{\"type\":\"string\",\"description\":\"ISO language name, e.g. English\"},\"confidence\":{\"type\":\"number\",\"description\":\"Classification confidence 0-100\"}},\"required\":[\"intent\",\"category\",\"urgency\",\"sentiment\",\"language\",\"confidence\"],\"additionalProperties\":false}"
+      },
+      "id": "0634343f-059b-4d43-8001-ee8667e0cfdc",
+      "name": "Intent Schema",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -2144,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "load",
+        "prompt": "={{ $('Normalize Input').item.json.customer_message }}",
+        "topK": 5,
+        "options": {
+          "columnNames": {
+            "values": {
+              "metadataColumnName": "knowledge_base"
+            }
+          }
+        }
+      },
+      "id": "f373a848-23f5-420c-b59e-6d2c3e5cf180",
+      "name": "Knowledge Search",
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePGVector",
+      "typeVersion": 1.3,
+      "position": [
+        -1936,
+        96
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR postgres credential"
+        }
+      },
+      "notes": "Step 4 — similarity search over the company knowledge base (FAQs, docs, policies, SOPs...) stored as vectors in PostgreSQL/PGVector."
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map((i) => i.json).filter((j) => j && Object.keys(j).length > 0);\nconst LF = String.fromCharCode(10);\nconst parts = rows.map((d, idx) => {\n  const text = (d.document && d.document.pageContent) || d.pageContent || d.text || d.content || JSON.stringify(d);\n  return \"[Doc \" + (idx + 1) + \"] \" + text;\n});\nconst context = parts.length ? parts.join(LF + LF) : \"NO_RELEVANT_KNOWLEDGE_FOUND\";\nreturn [{ json: { kb_context: context, kb_count: parts.length } }];"
+      },
+      "id": "4c6f145a-8bc9-4b15-adfc-69d51e56fe92",
+      "name": "Aggregate Knowledge",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1584,
+        96
+      ],
+      "notes": "Step 4 — collapses the retrieved documents into a single grounding context string for the response agent."
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Customer message: \"{{ $('Normalize Input').item.json.customer_message }}\"\nDetected category: {{ $('Intent Analysis').item.json.output.category }}\nUrgency: {{ $('Intent Analysis').item.json.output.urgency }}\n\nKnowledge base excerpts:\n{{ $json.kb_context }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are a professional, friendly customer support assistant. Answer using ONLY the knowledge base excerpts provided. NEVER invent information. If the excerpts do not contain the answer (or say NO_RELEVANT_KNOWLEDGE_FOUND), say you are not certain, ask a clarifying follow-up question, and set a low confidence. Be concise, reference company policies where relevant. Return response, a confidence score (0-100) reflecting how well the knowledge answered the question, and a suggested next_action for the support team."
+        }
+      },
+      "id": "507c3f3d-b6a0-43a4-87f7-4871f6d834a7",
+      "name": "Generate Response",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -1296,
+        96
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "notes": "Step 5 — grounded response generation. Confidence reflects answer quality and drives the escalation decision."
+    },
+    {
+      "parameters": {
+        "contextWindowLength": 12
+      },
+      "id": "34d2bf3c-4b24-4b63-91c8-d2c8a3ffe9ab",
+      "name": "Response Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.4,
+      "position": [
+        -1232,
+        320
+      ],
+      "notes": "Conversation history for the response agent, keyed by the same chat session id for context continuity."
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\"type\":\"object\",\"properties\":{\"response\":{\"type\":\"string\",\"description\":\"The reply to the customer, grounded ONLY in the provided knowledge\"},\"confidence\":{\"type\":\"number\",\"description\":\"How well the knowledge answered the question, 0-100\"},\"next_action\":{\"type\":\"string\",\"description\":\"Suggested next action for the support team\"}},\"required\":[\"response\",\"confidence\",\"next_action\"],\"additionalProperties\":false}"
+      },
+      "id": "93b99d21-ae56-452f-9911-7da7f0388670",
+      "name": "Response Schema",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -1072,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "conf",
+              "leftValue": "={{ $('Generate Response').item.json.output.confidence }}",
+              "rightValue": 90,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "89907eab-cb21-491b-87c1-b4c1bd0cb98e",
+      "name": "Confidence >= 90?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -896,
+        96
+      ],
+      "notes": "Step 6 — high confidence auto-responds; low confidence escalates to a human."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cid",
+              "name": "customer_id",
+              "value": "={{ $('Identify or Create Customer').item.json.customer_id }}",
+              "type": "number"
+            },
+            {
+              "id": "sid",
+              "name": "session_id",
+              "value": "={{ $('Normalize Input').item.json.session_id }}",
+              "type": "string"
+            },
+            {
+              "id": "chn",
+              "name": "channel",
+              "value": "={{ $('Normalize Input').item.json.channel }}",
+              "type": "string"
+            },
+            {
+              "id": "msg",
+              "name": "message",
+              "value": "={{ $('Normalize Input').item.json.customer_message }}",
+              "type": "string"
+            },
+            {
+              "id": "int",
+              "name": "intent",
+              "value": "={{ $('Intent Analysis').item.json.output.intent }}",
+              "type": "string"
+            },
+            {
+              "id": "cat",
+              "name": "category",
+              "value": "={{ $('Intent Analysis').item.json.output.category }}",
+              "type": "string"
+            },
+            {
+              "id": "urg",
+              "name": "urgency",
+              "value": "={{ $('Intent Analysis').item.json.output.urgency }}",
+              "type": "string"
+            },
+            {
+              "id": "sen",
+              "name": "sentiment",
+              "value": "={{ $('Intent Analysis').item.json.output.sentiment }}",
+              "type": "string"
+            },
+            {
+              "id": "lan",
+              "name": "language",
+              "value": "={{ $('Intent Analysis').item.json.output.language }}",
+              "type": "string"
+            },
+            {
+              "id": "aic",
+              "name": "ai_confidence",
+              "value": "={{ $('Generate Response').item.json.output.confidence }}",
+              "type": "number"
+            },
+            {
+              "id": "air",
+              "name": "ai_response",
+              "value": "={{ $('Generate Response').item.json.output.response }}",
+              "type": "string"
+            },
+            {
+              "id": "esc",
+              "name": "escalation_status",
+              "value": "none",
+              "type": "string"
+            },
+            {
+              "id": "res",
+              "name": "resolution_status",
+              "value": "resolved",
+              "type": "string"
+            },
+            {
+              "id": "aga",
+              "name": "assigned_agent",
+              "value": "AI Assistant",
+              "type": "string"
+            },
+            {
+              "id": "rtm",
+              "name": "response_time_ms",
+              "value": "={{ $now.toMillis() - $('Normalize Input').item.json.received_ms }}",
+              "type": "number"
+            },
+            {
+              "id": "rep",
+              "name": "customer_reply",
+              "value": "={{ $('Generate Response').item.json.output.response }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c7d94364-8f3d-48cf-8e6e-8a0291b43cbe",
+      "name": "Prepare Auto Resolution",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        0,
+        0
+      ],
+      "notes": "Step 6 (high confidence) — consolidates every field needed for reply + persistence into one item."
+    },
+    {
+      "parameters": {},
+      "id": "2f8b47f0-9747-4a43-ad86-7007080ed22d",
+      "name": "Merge Resolution",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        224,
+        96
+      ],
+      "notes": "Funnels the auto-resolve and escalation branches back into one persistence + reply path."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO support_tickets (customer_id, session_id, category, priority, ai_summary, suggested_resolution, status, created_at)\nVALUES ($1, $2, $3, $4, $5, $6, 'open', NOW())\nRETURNING id AS ticket_id, priority, status;",
+        "options": {
+          "queryReplacement": "={{ [$('Identify or Create Customer').item.json.customer_id, $('Normalize Input').item.json.session_id, $('Intent Analysis').item.json.output.category, $('Intent Analysis').item.json.output.urgency, $('Generate Response').item.json.output.response, $('Generate Response').item.json.output.next_action] }}"
+        }
+      },
+      "id": "ad25fc9e-eb07-4eb5-b0f6-2ec9ca4d375f",
+      "name": "Create Support Ticket",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        -672,
+        192
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR postgres credential"
+        }
+      },
+      "notes": "Step 7 — creates a human support ticket with customer details, AI summary, suggested resolution and priority (from urgency)."
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "support-alerts",
+          "mode": "name"
+        },
+        "text": "=🚨 *New escalation* — Ticket #{{ $json.ticket_id }} ({{ $json.priority }})\n*Category:* {{ $('Intent Analysis').item.json.output.category }}\n*Customer:* {{ $('Identify or Create Customer').item.json.name || 'Unknown' }} (ID {{ $('Identify or Create Customer').item.json.customer_id }}, {{ $('Identify or Create Customer').item.json.tier }})\n*Message:* {{ $('Normalize Input').item.json.customer_message }}\n*AI summary:* {{ $('Generate Response').item.json.output.response }}\n*Suggested resolution:* {{ $('Generate Response').item.json.output.next_action }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "id": "71ef0129-9878-4276-9f3b-5d47ddb96d0e",
+      "name": "Notify Support (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.5,
+      "position": [
+        -448,
+        192
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR slackApi credential"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Step 7 — notifies the support team in Slack."
+    },
+    {
+      "parameters": {
+        "sendTo": "you@example.com",
+        "subject": "=[Escalation] Ticket #{{ $('Create Support Ticket').item.json.ticket_id }} — {{ $('Intent Analysis').item.json.output.category }} ({{ $('Intent Analysis').item.json.output.urgency }})",
+        "message": "=<h3>New support escalation</h3><p><b>Ticket:</b> #{{ $('Create Support Ticket').item.json.ticket_id }}<br/><b>Priority:</b> {{ $('Create Support Ticket').item.json.priority }}<br/><b>Category:</b> {{ $('Intent Analysis').item.json.output.category }}<br/><b>Customer:</b> {{ $('Identify or Create Customer').item.json.name || 'Unknown' }} (ID {{ $('Identify or Create Customer').item.json.customer_id }})</p><p><b>Message:</b><br/>{{ $('Normalize Input').item.json.customer_message }}</p><p><b>AI summary:</b><br/>{{ $('Generate Response').item.json.output.response }}</p><p><b>Suggested resolution:</b><br/>{{ $('Generate Response').item.json.output.next_action }}</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "491f9fa7-39cd-44eb-9dbd-49117c9ef7ab",
+      "name": "Notify Support (Email)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -224,
+        192
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR gmailOAuth2 credential"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Step 7 — emails the support team (secondary channel)."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cid",
+              "name": "customer_id",
+              "value": "={{ $('Identify or Create Customer').item.json.customer_id }}",
+              "type": "string"
+            },
+            {
+              "id": "sid",
+              "name": "session_id",
+              "value": "={{ $('Normalize Input').item.json.session_id }}",
+              "type": "string"
+            },
+            {
+              "id": "chn",
+              "name": "channel",
+              "value": "={{ $('Normalize Input').item.json.channel }}",
+              "type": "string"
+            },
+            {
+              "id": "msg",
+              "name": "message",
+              "value": "={{ $('Normalize Input').item.json.customer_message }}",
+              "type": "string"
+            },
+            {
+              "id": "int",
+              "name": "intent",
+              "value": "={{ $('Intent Analysis').item.json.output.intent }}",
+              "type": "string"
+            },
+            {
+              "id": "cat",
+              "name": "category",
+              "value": "={{ $('Intent Analysis').item.json.output.category }}",
+              "type": "string"
+            },
+            {
+              "id": "urg",
+              "name": "urgency",
+              "value": "={{ $('Intent Analysis').item.json.output.urgency }}",
+              "type": "string"
+            },
+            {
+              "id": "sen",
+              "name": "sentiment",
+              "value": "={{ $('Intent Analysis').item.json.output.sentiment }}",
+              "type": "string"
+            },
+            {
+              "id": "lan",
+              "name": "language",
+              "value": "={{ $('Intent Analysis').item.json.output.language }}",
+              "type": "string"
+            },
+            {
+              "id": "aic",
+              "name": "ai_confidence",
+              "value": "={{ $('Generate Response').item.json.output.confidence }}",
+              "type": "number"
+            },
+            {
+              "id": "air",
+              "name": "ai_response",
+              "value": "={{ $('Generate Response').item.json.output.response }}",
+              "type": "string"
+            },
+            {
+              "id": "esc",
+              "name": "escalation_status",
+              "value": "escalated",
+              "type": "string"
+            },
+            {
+              "id": "res",
+              "name": "resolution_status",
+              "value": "pending",
+              "type": "string"
+            },
+            {
+              "id": "aga",
+              "name": "assigned_agent",
+              "value": "Human Support",
+              "type": "string"
+            },
+            {
+              "id": "tid",
+              "name": "ticket_id",
+              "value": "={{ $('Create Support Ticket').item.json.ticket_id }}",
+              "type": "string"
+            },
+            {
+              "id": "rtm",
+              "name": "response_time_ms",
+              "value": "={{ $now.toMillis() - $('Normalize Input').item.json.received_ms }}",
+              "type": "number"
+            },
+            {
+              "id": "rep",
+              "name": "customer_reply",
+              "value": "=Thanks for reaching out! Your request needs a specialist, so I've created ticket #{{ $('Create Support Ticket').item.json.ticket_id }} and our support team will follow up with you shortly.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dc6e310b-3bea-4571-aa20-b703ada690e5",
+      "name": "Prepare Escalation",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        0,
+        192
+      ],
+      "notes": "Step 7 (low confidence) — consolidates fields for the escalation reply + persistence."
+    },
+    {
+      "parameters": {
+        "message": "={{ ({ empty_message: \"It looks like your message was empty — please type your question and I'll be happy to help.\", message_too_long: \"Your message is quite long. Could you shorten it or split it into a few questions?\", spam_excessive_links: \"For security we can't process messages with many links. Please describe your issue in words.\", spam_repeated_characters: \"I couldn't read that message. Could you rephrase your question?\", unsupported_attachment: \"That attachment type isn't supported. Please send images or PDFs only.\", \"\": \"Sorry, I couldn't process that request. Please try again.\" })[$json.validation_reason] }}",
+        "options": {}
+      },
+      "id": "1ab49a78-44aa-4aef-91bd-e5952f9691b0",
+      "name": "Send Validation Message",
+      "type": "@n8n/n8n-nodes-langchain.chat",
+      "typeVersion": 1.3,
+      "position": [
+        -2624,
+        288
+      ],
+      "notes": "Step 1 — friendly, channel-appropriate validation message returned to the customer."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO support_events (session_id, channel, event_type, detail, created_at) VALUES ($1, $2, $3, $4, NOW());",
+        "options": {
+          "queryReplacement": "={{ [$json.session_id, $json.channel, \"validation_failed\", $json.validation_reason] }}"
+        }
+      },
+      "id": "c5728642-08ee-4264-a01c-b886f62195af",
+      "name": "Log Invalid Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        -2624,
+        480
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR postgres credential"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Step 1 — audit trail for rejected messages. Uses parameterized SQL ($1..$4) to prevent injection."
+    },
+    {
+      "parameters": {
+        "message": "={{ $json.customer_reply }}",
+        "options": {}
+      },
+      "id": "06085125-16ba-4008-96fe-2da169663a17",
+      "name": "Send Reply to Customer",
+      "type": "@n8n/n8n-nodes-langchain.chat",
+      "typeVersion": 1.3,
+      "position": [
+        448,
+        0
+      ],
+      "notes": "Step 8 — replies to the customer on the same channel (Website Chat)."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE customers SET\n  last_contact = NOW(),\n  last_category = $2,\n  last_sentiment = $3,\n  last_resolution_status = $4,\n  assigned_agent = $5,\n  last_ai_confidence = $6\nWHERE id = $1;",
+        "options": {
+          "queryReplacement": "={{ [$json.customer_id, $json.category, $json.sentiment, $json.resolution_status, $json.assigned_agent, $json.ai_confidence] }}"
+        }
+      },
+      "id": "7477b55a-2e7a-4aba-a8cf-46f3489b690a",
+      "name": "Update CRM",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        448,
+        192
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR postgres credential"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Step 9 — updates the CRM record (category, sentiment, resolution status, assigned agent, AI confidence, last contact)."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO conversations\n(customer_id, session_id, channel, message, intent, category, urgency, sentiment, language, ai_confidence, ai_response, escalation_status, resolution_status, assigned_agent, response_time_ms, created_at)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [$json.customer_id, $json.session_id, $json.channel, $json.message, $json.intent, $json.category, $json.urgency, $json.sentiment, $json.language, $json.ai_confidence, $json.ai_response, $json.escalation_status, $json.resolution_status, $json.assigned_agent, $json.response_time_ms] }}"
+        }
+      },
+      "id": "928b94c5-6189-41c9-8152-644c42390a5a",
+      "name": "Store Conversation",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        448,
+        384
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR postgres credential"
+        }
+      },
+      "notes": "Steps 10 & 11 — persists the full conversation record to PostgreSQL. These rows are the source data for analytics and the daily executive report."
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        -512,
+        304
+      ],
+      "id": "bea39a72-8e85-4b74-b7e2-c130e5e7ffc2",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googlePalmApi credential"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -1856,
+        304
+      ],
+      "id": "d4d788f5-a31c-4d24-aa9b-17c39294017d",
+      "name": "Embeddings Google Gemini",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googlePalmApi credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.1-flash-lite",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        -2400,
+        288
+      ],
+      "id": "d155e501-a423-4c46-a06c-a6d1ffaf430c",
+      "name": "Google Gemini Chat Model1",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googlePalmApi credential"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Website Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Input": {
+      "main": [
+        [
+          {
+            "node": "Validate & Sanitize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Sanitize": {
+      "main": [
+        [
+          {
+            "node": "Is Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Valid?": {
+      "main": [
+        [
+          {
+            "node": "Identify or Create Customer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Validation Message",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Invalid Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Identify or Create Customer": {
+      "main": [
+        [
+          {
+            "node": "Intent Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Intent Analysis": {
+      "main": [
+        [
+          {
+            "node": "Knowledge Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Intent Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Intent Analysis",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Intent Schema": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Intent Analysis",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Knowledge Search": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Knowledge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Knowledge": {
+      "main": [
+        [
+          {
+            "node": "Generate Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Response": {
+      "main": [
+        [
+          {
+            "node": "Confidence >= 90?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Response Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Generate Response",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Response Schema": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Generate Response",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confidence >= 90?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Auto Resolution",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Support Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Auto Resolution": {
+      "main": [
+        [
+          {
+            "node": "Merge Resolution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Resolution": {
+      "main": [
+        [
+          {
+            "node": "Send Reply to Customer",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Update CRM",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Store Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Support Ticket": {
+      "main": [
+        [
+          {
+            "node": "Notify Support (Slack)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Support (Slack)": {
+      "main": [
+        [
+          {
+            "node": "Notify Support (Email)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Support (Email)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Escalation": {
+      "main": [
+        [
+          {
+            "node": "Merge Resolution",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Generate Response",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings Google Gemini": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Knowledge Search",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Intent Analysis",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "errorWorkflow": "YOUR_ERROR_WORKFLOW_ID"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "tags": []
+}

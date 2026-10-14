@@ -1,0 +1,1416 @@
+{
+  "name": "AI Lead Qualification & Sales Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const src = $json.body || $json;\nconst s = (v) => (v === undefined || v === null) ? \"\" : String(v).trim();\nconst fullName = s(src.fullName || src.full_name || src.name);\nconst companyName = s(src.companyName || src.company_name || src.company);\nconst email = s(src.email).toLowerCase();\nconst phone = s(src.phone || src.phoneNumber || src.phone_number);\nconst country = s(src.country);\nconst industry = s(src.industry);\nconst companySize = s(src.companySize || src.company_size);\nconst budget = s(src.budget);\nconst projectDescription = s(src.projectDescription || src.project_description || src.message || src.description);\nconst serviceInterested = s(src.serviceInterested || src.service_interested || src.service);\nconst source = s(src.source) || \"Webhook\";\nconst submittedAt = s(src.submissionTimestamp || src.timestamp) || new Date().toISOString();\nconst errors = [];\nif (!fullName) errors.push(\"Full name is required\");\nif (!email) errors.push(\"Email is required\");\nif (!projectDescription) errors.push(\"Project description is required\");\nconst at = email.indexOf(\"@\");\nconst dot = email.lastIndexOf(\".\");\nconst emailOk = at > 0 && dot > at + 1 && dot < email.length - 1;\nif (email && !emailOk) errors.push(\"Email format is invalid\");\nlet digits = \"\";\nfor (const ch of phone) { if (ch >= \"0\" && ch <= \"9\") digits += ch; }\nconst phoneValid = digits.length >= 7 && digits.length <= 15;\nif (phone && !phoneValid) errors.push(\"Phone number is invalid\");\nlet spamScore = 0;\nconst desc = projectDescription.toLowerCase();\nconst spamWords = [\"viagra\",\"casino\",\"bitcoin\",\"free money\",\"seo services\",\"click here\",\"loan offer\"];\nfor (const w of spamWords) { if (desc.indexOf(w) !== -1) spamScore++; }\nconst linkCount = desc.split(\"http\").length - 1;\nif (linkCount >= 3) spamScore++;\nconst disposable = [\"mailinator.com\",\"tempmail.com\",\"guerrillamail.com\",\"10minutemail.com\"];\nconst emailDomain = email.split(\"@\")[1] || \"\";\nif (disposable.indexOf(emailDomain) !== -1) spamScore++;\nconst isSpam = spamScore >= 2;\nif (isSpam) errors.push(\"Submission flagged as spam\");\nconst valid = errors.length === 0;\nreturn { valid, isSpam, errors, fullName, companyName, email, phone, phoneValid, country, industry, companySize, budget, projectDescription, serviceInterested, source, submittedAt };"
+      },
+      "id": "687dba6f-3153-4e6c-aebe-896a070384bf",
+      "name": "Normalize & Validate Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1120,
+        384
+      ],
+      "alwaysOutputData": false,
+      "retryOnFail": false
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "valid",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "401a19e3-ac8c-485b-a6d7-55172f7076e0",
+      "name": "Is Valid Submission?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -896,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_RESOURCE_ID",
+          "mode": "list",
+          "cachedResultName": "AnchorNova Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit#gid=0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "email",
+              "lookupValue": "={{ $json.email }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "374779ca-581c-48c4-b6f5-93c080b16c01",
+      "name": "Lookup Existing Lead",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -672,
+        288
+      ],
+      "retryOnFail": true,
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleSheetsOAuth2Api credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const lead = $(\"Normalize & Validate Lead\").item.json;\nconst rows = $input.all().map(i => i.json).filter(r => r && Object.keys(r).length > 0);\nconst email = (lead.email || \"\").toLowerCase();\nconst match = rows.find(r => String(r.email || r.Email || \"\").toLowerCase() === email);\nreturn [{ json: Object.assign({}, lead, { isDuplicate: !!match, existingRow: match || null, duplicateCheckedAt: new Date().toISOString() }) }];"
+      },
+      "id": "0e17f97a-e5d3-4c21-838b-68147078b4a9",
+      "name": "Check Duplicate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dup",
+              "leftValue": "={{ $json.isDuplicate }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "fe007f27-d4ca-4a3e-96da-3e8963323f51",
+      "name": "Is Duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -224,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_RESOURCE_ID",
+          "mode": "list",
+          "cachedResultName": "AnchorNova Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Duplicates"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now.toISO() }}",
+            "full_name": "={{ $json.fullName }}",
+            "email": "={{ $json.email }}",
+            "company_name": "={{ $json.companyName }}",
+            "source": "={{ $json.source }}"
+          },
+          "schema": [
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "full_name",
+              "displayName": "full_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "company_name",
+              "displayName": "company_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "source",
+              "displayName": "source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ff7a24b7-1e33-438a-b3c3-3a565c58b444",
+      "name": "Log Duplicate",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        0,
+        0
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleSheetsOAuth2Api credential"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "support-alerts",
+          "mode": "name"
+        },
+        "text": "=Duplicate lead re-submitted: {{ $json.fullName }} ({{ $json.companyName }}) — {{ $json.email }}. Skipped qualification.",
+        "otherOptions": {}
+      },
+      "id": "9ee79a96-cc03-4130-aa01-378985ba219a",
+      "name": "Slack: Duplicate Lead",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.5,
+      "position": [
+        0,
+        192
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR slackApi credential"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"duplicate\", \"message\": \"Lead already exists\", \"email\": $json.email } }}",
+        "options": {
+          "responseCode": 409
+        }
+      },
+      "id": "8cf9ea1b-9780-4c15-91e8-effd190b2166",
+      "name": "Respond: Duplicate",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        0,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const lead = $(\"Check Duplicate\").item.json;\nlet ai = ($json.output && $json.output[0] && $json.output[0].content && $json.output[0].content[0]) ? $json.output[0].content[0].text : {};\nif (typeof ai === \"string\") { try { ai = JSON.parse(ai); } catch (e) { ai = {}; } }\nai = ai || {};\nconst parts = (lead.fullName || \"\").split(\" \");\nconst firstName = parts[0] || \"\";\nconst lastName = parts.slice(1).join(\" \");\nreturn Object.assign({}, lead, {\n  firstName, lastName,\n  lead_score: (ai.lead_score !== undefined && ai.lead_score !== null) ? ai.lead_score : 0,\n  lead_category: ai.lead_category || \"Cold\",\n  priority: ai.priority || \"Low\",\n  business_type: ai.business_type || \"\",\n  buying_intent: ai.buying_intent || \"\",\n  urgency: ai.urgency || \"\",\n  complexity: ai.complexity || \"\",\n  recommended_service: ai.recommended_service || lead.serviceInterested || \"\",\n  sales_summary: ai.sales_summary || \"\",\n  recommended_action: ai.recommended_action || \"\",\n});"
+      },
+      "id": "8a0309ba-4a0e-4510-9f2b-559947135722",
+      "name": "Merge Qualification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        192,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "appToken",
+        "email": "={{ $json.email }}",
+        "additionalFields": {
+          "companyName": "={{ $json.companyName }}",
+          "companySize": "={{ $json.companySize }}",
+          "country": "={{ $json.country }}",
+          "firstName": "=   {{ $json.fullName.split(' ')[0] }}",
+          "industry": "={{ $json.industry }}",
+          "lastName": "=   {{ $json.fullName.split(' ')[0] }}",
+          "message": "={{ $json.sales_summary }}",
+          "phoneNumber": "={{ $json.phone }}"
+        },
+        "options": {}
+      },
+      "id": "19fdbc13-c461-48d7-afdc-44b969a82a3c",
+      "name": "HubSpot Upsert Contact",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        544
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR hubspotAppToken credential"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const d = $(\"Merge Qualification\").item.json;\nconst industry = (d.industry || \"\").toLowerCase();\nlet bd = \"\";\nfor (const ch of String(d.budget || \"\")) { if (ch >= \"0\" && ch <= \"9\") bd += ch; }\nconst budgetNumeric = bd ? parseInt(bd, 10) : 0;\nlet assignedTo = \"General Sales\";\nlet team = \"General Sales\";\nif (industry.indexOf(\"health\") !== -1) { assignedTo = \"Healthcare Sales\"; team = \"Healthcare\"; }\nelse if (industry.indexOf(\"ngo\") !== -1 || industry.indexOf(\"non-profit\") !== -1 || industry.indexOf(\"nonprofit\") !== -1) { assignedTo = \"NGO Consultant\"; team = \"NGO\"; }\nelse if (industry.indexOf(\"real estate\") !== -1 || industry.indexOf(\"realestate\") !== -1 || industry.indexOf(\"property\") !== -1) { assignedTo = \"Real Estate Team\"; team = \"Real Estate\"; }\nconst highValue = budgetNumeric >= 50000 || d.lead_category === \"Hot\" || d.priority === \"High\";\nif (highValue) { assignedTo = \"Senior Consultant\"; team = \"Senior Consultants\"; }\nreturn Object.assign({}, d, { budgetNumeric, assignedTo, team, status: \"New\", ownerAssignedAt: new Date().toISOString() });"
+      },
+      "id": "f80181fa-2991-45b6-b186-9cc018722586",
+      "name": "Route to Sales Team",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        704,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "support-alerts",
+          "mode": "name"
+        },
+        "text": "=:fire: *New {{ $json.lead_category }} Lead* — Score {{ $json.lead_score }}/100 ({{ $json.priority }} priority)\n*Name:* {{ $json.fullName }}   *Company:* {{ $json.companyName }}\n*Budget:* {{ $json.budget }}   *Assigned:* {{ $json.assignedTo }}\n*Recommended action:* {{ $json.recommended_action }}\n\n{{ $json.sales_summary }}",
+        "otherOptions": {}
+      },
+      "id": "1384185f-3ef5-4f8e-94af-f6e2a5add5b6",
+      "name": "Slack: Notify Sales",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.5,
+      "position": [
+        896,
+        0
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR slackApi credential"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "you@example.com",
+        "subject": "=New {{ $json.lead_category }} Lead: {{ $json.fullName }} ({{ $json.companyName }})",
+        "message": "=<h2>New {{ $json.lead_category }} Lead — Score {{ $json.lead_score }}/100</h2>\n<p><b>Name:</b> {{ $json.fullName }}<br/>\n<b>Company:</b> {{ $json.companyName }}<br/>\n<b>Email:</b> {{ $json.email }}<br/>\n<b>Phone:</b> {{ $json.phone }}<br/>\n<b>Budget:</b> {{ $json.budget }}<br/>\n<b>Priority:</b> {{ $json.priority }}<br/>\n<b>Assigned to:</b> {{ $json.assignedTo }}<br/>\n<b>Recommended action:</b> {{ $json.recommended_action }}</p>\n<p><b>Sales summary:</b><br/>{{ $json.sales_summary }}</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "2ace2f32-98fe-4a3b-9e78-6ebdf933ab22",
+      "name": "Email: Notify Sales",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        896,
+        192
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR gmailOAuth2 credential"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "resource": "channelMessage",
+        "teamId": "<__PLACEHOLDER_VALUE__Microsoft Teams team ID__>",
+        "channelId": "<__PLACEHOLDER_VALUE__Microsoft Teams channel ID__>",
+        "messageType": "html",
+        "message": "=<b>New {{ $json.lead_category }} Lead — Score {{ $json.lead_score }}/100 ({{ $json.priority }})</b><br/>\nName: {{ $json.fullName }} | Company: {{ $json.companyName }}<br/>\nBudget: {{ $json.budget }} | Assigned: {{ $json.assignedTo }}<br/>\nRecommended action: {{ $json.recommended_action }}<br/>\n{{ $json.sales_summary }}",
+        "options": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "id": "f084f75c-dca6-48a9-96b3-115ba475d420",
+      "name": "Teams: Notify Sales",
+      "type": "n8n-nodes-base.microsoftTeams",
+      "typeVersion": 1.1,
+      "position": [
+        896,
+        384
+      ],
+      "retryOnFail": true,
+      "disabled": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "=Thanks for reaching out, {{ $json.firstName }}!",
+        "message": "=<p>Hi {{ $json.firstName }},</p>\n<p>Thank you for contacting us about <b>{{ $json.serviceInterested }}</b>. We have received your enquiry and a member of our team will get back to you within <b>one business day</b>.</p>\n<p>In the meantime, feel free to book a time that suits you here: <a href=\"https://cal.example.com/your-team\">Book a call</a> (replace with your booking link).</p>\n<p>Warm regards,<br/>The Sales Team</p>\n<hr/><p style=\"color:#888;font-size:12px;\">Our company helps businesses like {{ $json.companyName }} deliver great software and services.</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "48c9bbe7-25f5-4b14-8b8a-58fcde3fc7a5",
+      "name": "Email: Customer Confirmation",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        896,
+        576
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR gmailOAuth2 credential"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_RESOURCE_ID",
+          "mode": "list",
+          "cachedResultName": "AnchorNova Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now.toISO() }}",
+            "full_name": "={{ $json.fullName }}",
+            "company_name": "={{ $json.companyName }}",
+            "email": "={{ $json.email }}",
+            "phone": "={{ $json.phone }}",
+            "country": "={{ $json.country }}",
+            "industry": "={{ $json.industry }}",
+            "company_size": "={{ $json.companySize }}",
+            "budget": "={{ $json.budget }}",
+            "project_description": "={{ $json.projectDescription }}",
+            "service_interested": "={{ $json.serviceInterested }}",
+            "source": "={{ $json.source }}",
+            "lead_score": "={{ $json.lead_score }}",
+            "lead_category": "={{ $json.lead_category }}",
+            "priority": "={{ $json.priority }}",
+            "sales_summary": "={{ $json.sales_summary }}",
+            "recommended_service": "={{ $json.recommended_service }}",
+            "assigned_to": "={{ $json.assignedTo }}",
+            "status": "={{ $json.status }}",
+            "hubspot_id": "=   {{ $('HubSpot Upsert Contact').item.json.id }}",
+            "created_date": "={{ $json.submittedAt }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "full_name",
+              "displayName": "full_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "company_name",
+              "displayName": "company_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "country",
+              "displayName": "country",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "industry",
+              "displayName": "industry",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "company_size",
+              "displayName": "company_size",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "budget",
+              "displayName": "budget",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "project_description",
+              "displayName": "project_description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "service_interested",
+              "displayName": "service_interested",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "source",
+              "displayName": "source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "lead_score",
+              "displayName": "lead_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "lead_category",
+              "displayName": "lead_category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "sales_summary",
+              "displayName": "sales_summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "recommended_service",
+              "displayName": "recommended_service",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "assigned_to",
+              "displayName": "assigned_to",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "hubspot_id",
+              "displayName": "hubspot_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "created_date",
+              "displayName": "created_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "converted_date",
+              "displayName": "converted_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "3c3d06d1-20da-4223-a04b-061c4b714c14",
+      "name": "Log Lead (Reporting)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        896,
+        768
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleSheetsOAuth2Api credential"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"received\", \"lead_score\": $json.lead_score, \"lead_category\": $json.lead_category, \"priority\": $json.priority, \"assigned_to\": $json.assignedTo, \"message\": \"Thank you, your enquiry has been received.\" } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "dde775d2-3fce-4828-935b-85389a5efae4",
+      "name": "Respond: Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        896,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "phone",
+              "leftValue": "={{ $json.phoneValid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ce3cd88d-d7c3-42eb-90eb-f7cba3ababf3",
+      "name": "Has Phone Number?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        896,
+        1152
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "phoneNumberId": "<__PLACEHOLDER_VALUE__WhatsApp Business phone number ID__>",
+        "recipientPhoneNumber": "={{ $json.phone }}",
+        "textBody": "=Hi {{ $json.fullName }}, thanks for reaching out! We have received your enquiry about {{ $json.serviceInterested }} and our team will contact you shortly.",
+        "additionalFields": {}
+      },
+      "id": "73d307ab-2511-495a-aaee-2649beb4c7d0",
+      "name": "WhatsApp: Confirm Receipt",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1.1,
+      "position": [
+        1152,
+        1136
+      ],
+      "retryOnFail": true,
+      "disabled": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"rejected\", \"errors\": $json.errors } }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "be00e583-c7b9-46b1-a92b-f37bc65267df",
+      "name": "Respond: Validation Errors",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -672,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "4c2f6218-18ec-4b45-8609-a3321db9cc93",
+      "name": "Daily Follow-up Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -992,
+        896
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_RESOURCE_ID",
+          "mode": "list",
+          "cachedResultName": "AnchorNova Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 182032888,
+          "mode": "list",
+          "cachedResultName": "Follow up",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit#gid=182032888"
+        },
+        "options": {}
+      },
+      "id": "a5706448-2b0d-4c27-ad73-6edcbad2fbc9",
+      "name": "Read Leads (Follow-up)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -768,
+        896
+      ],
+      "retryOnFail": true,
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleSheetsOAuth2Api credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(i => i.json).filter(r => r && Object.keys(r).length > 0);\nconst now = new Date();\nconst out = [];\nfor (const r of rows) {\n  const status = String(r.status || r.Status || \"\").toLowerCase();\n  if (status === \"customer\" || status === \"converted\" || status === \"closed\") continue;\n  const createdRaw = r.created_date || r.timestamp || r.submittedAt;\n  if (!createdRaw) continue;\n  const created = new Date(createdRaw);\n  if (isNaN(created.getTime())) continue;\n  const days = Math.floor((now.getTime() - created.getTime()) / 86400000);\n  const name = r.full_name || r.fullName || \"there\";\n  const company = r.company_name || r.companyName || \"your company\";\n  let subject = \"\"; let body = \"\"; let type = \"\";\n  if (days === 2) {\n    type = \"resource\";\n    subject = \"A helpful resource for \" + company;\n    body = \"<p>Hi \" + name + \",</p><p>While we prepare your proposal, here is a resource we think you will find useful.</p>\";\n  } else if (days === 5) {\n    type = \"case_study\";\n    subject = \"How we helped a company like \" + company;\n    body = \"<p>Hi \" + name + \",</p><p>Here is a short case study showing results we delivered for a similar business.</p>\";\n  } else if (days === 10) {\n    type = \"reminder\";\n    subject = \"Following up on your enquiry\";\n    body = \"<p>Hi \" + name + \",</p><p>Just checking in — are you still interested in moving forward? Reply any time and we will help.</p>\";\n  } else { continue; }\n  const email = r.email || r.Email;\n  if (!email) continue;\n  out.push({ json: { email, name, followup_type: type, subject, body } });\n}\nreturn out;"
+      },
+      "id": "aa93ad31-f4cf-4c6f-874e-9d3dd994f438",
+      "name": "Determine Due Follow-ups",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -544,
+        896
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.body }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "ad0fefe7-595d-402a-967c-f70632a537ae",
+      "name": "Email: Send Follow-up",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -320,
+        896
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR gmailOAuth2 credential"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7
+            }
+          ]
+        }
+      },
+      "id": "6212e1b3-bc76-47b2-9aac-409630eeeb78",
+      "name": "Daily Dashboard Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -992,
+        1120
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_RESOURCE_ID",
+          "mode": "list",
+          "cachedResultName": "AnchorNova Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1388395777,
+          "mode": "list",
+          "cachedResultName": "Dashboard",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit#gid=1388395777"
+        },
+        "options": {}
+      },
+      "id": "86c78a44-58d2-4c6a-a7a5-d5fb377c8fde",
+      "name": "Read Leads (Dashboard)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -768,
+        1120
+      ],
+      "retryOnFail": true,
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleSheetsOAuth2Api credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(i => i.json).filter(r => r && Object.keys(r).length > 0);\nconst total = rows.length;\nlet hot = 0, warm = 0, cold = 0, converted = 0, scoreSum = 0, scoreCount = 0;\nconst sources = {}; const industries = {};\nfor (const r of rows) {\n  const cat = String(r.lead_category || \"\").toLowerCase();\n  if (cat === \"hot\") hot++; else if (cat === \"warm\") warm++; else if (cat === \"cold\") cold++;\n  const st = String(r.status || \"\").toLowerCase();\n  if (st === \"customer\" || st === \"converted\") converted++;\n  const sc = parseFloat(r.lead_score); if (!isNaN(sc)) { scoreSum += sc; scoreCount++; }\n  const src = r.source || \"Unknown\"; sources[src] = (sources[src] || 0) + 1;\n  const ind = r.industry || \"Unknown\"; industries[ind] = (industries[ind] || 0) + 1;\n}\nconst average_lead_score = scoreCount ? Math.round(scoreSum / scoreCount) : 0;\nconst conversion_rate_pct = total ? Math.round((converted / total) * 10000) / 100 : 0;\nreturn [{ json: {\n  snapshot_date: new Date().toISOString(),\n  total_leads: total, hot_leads: hot, warm_leads: warm, cold_leads: cold,\n  converted_leads: converted, conversion_rate_pct, average_lead_score,\n  pipeline_open: total - converted,\n  lead_sources: JSON.stringify(sources), industries: JSON.stringify(industries),\n} }];"
+      },
+      "id": "2ab5fe0c-d553-4a39-8c03-755008a5cae9",
+      "name": "Compute Dashboard Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -544,
+        1120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_RESOURCE_ID",
+          "mode": "list",
+          "cachedResultName": "AnchorNova Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1388395777,
+          "mode": "list",
+          "cachedResultName": "Dashboard",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit#gid=1388395777"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "snapshot_date",
+              "displayName": "snapshot_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "total_leads",
+              "displayName": "total_leads",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "hot_leads",
+              "displayName": "hot_leads",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "warm_leads",
+              "displayName": "warm_leads",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "cold_leads",
+              "displayName": "cold_leads",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "converted_leads",
+              "displayName": "converted_leads",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "conversion_rate_pct",
+              "displayName": "conversion_rate_pct",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "average_lead_score",
+              "displayName": "average_lead_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "pipeline_open",
+              "displayName": "pipeline_open",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lead_sources",
+              "displayName": "lead_sources",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "industries",
+              "displayName": "industries",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "57ceddee-7c52-43e8-8777-825d291ce94d",
+      "name": "Append Dashboard Snapshot",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -320,
+        1120
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googleSheetsOAuth2Api credential"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-intake",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1344,
+        384
+      ],
+      "id": "56f5c18e-16b6-497c-9310-b5ae93bd36da",
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Qualify this lead:\nFull Name: {{ $json.fullName }}\nCompany: {{ $json.companyName }}\nEmail: {{ $json.email }}\nCountry: {{ $json.country }}\nIndustry: {{ $json.industry }}\nCompany Size: {{ $json.companySize }}\nBudget: {{ $json.budget }}\nService Interested In: {{ $json.serviceInterested }}\nProject Description: {{ $json.projectDescription }}",
+        "options": {
+          "systemMessage": "You are a B2B sales lead qualification expert. Analyze the lead and return ONLY valid JSON, with no extra text, no markdown, no code fences — matching exactly this structure:\n\n{\"lead_score\": <integer 0-100>, \"lead_category\": \"<Hot, Warm, or Cold>\", \"priority\": \"<High, Medium, or Low>\", \"business_type\": \"<string>\", \"buying_intent\": \"<string>\", \"urgency\": \"<string>\", \"complexity\": \"<string>\", \"recommended_service\": \"<string>\", \"sales_summary\": \"<1-2 sentence string>\", \"recommended_action\": \"<string>\"}\n\nScore buying intent, urgency and project complexity to produce lead_score from 0-100. Categorize as Hot (>=70), Warm (40-69) or Cold (<40). Set priority High/Medium/Low."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -224,
+        528
+      ],
+      "id": "cd41c449-bd8e-43cd-b21f-abb4f5bc85b3",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.6-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        -256,
+        688
+      ],
+      "id": "17298deb-f004-49bc-bea5-66037e0018a8",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR googlePalmApi credential"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Normalize & Validate Lead": {
+      "main": [
+        [
+          {
+            "node": "Is Valid Submission?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Valid Submission?": {
+      "main": [
+        [
+          {
+            "node": "Lookup Existing Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond: Validation Errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Existing Lead": {
+      "main": [
+        [
+          {
+            "node": "Check Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Duplicate": {
+      "main": [
+        [
+          {
+            "node": "Is Duplicate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Duplicate?": {
+      "main": [
+        [
+          {
+            "node": "Log Duplicate",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Slack: Duplicate Lead",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Respond: Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Qualification": {
+      "main": [
+        [
+          {
+            "node": "HubSpot Upsert Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot Upsert Contact": {
+      "main": [
+        [
+          {
+            "node": "Route to Sales Team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route to Sales Team": {
+      "main": [
+        [
+          {
+            "node": "Slack: Notify Sales",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email: Notify Sales",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Teams: Notify Sales",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email: Customer Confirmation",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Lead (Reporting)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Respond: Success",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Has Phone Number?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Phone Number?": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp: Confirm Receipt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Follow-up Schedule": {
+      "main": [
+        [
+          {
+            "node": "Read Leads (Follow-up)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Leads (Follow-up)": {
+      "main": [
+        [
+          {
+            "node": "Determine Due Follow-ups",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Determine Due Follow-ups": {
+      "main": [
+        [
+          {
+            "node": "Email: Send Follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Dashboard Schedule": {
+      "main": [
+        [
+          {
+            "node": "Read Leads (Dashboard)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Leads (Dashboard)": {
+      "main": [
+        [
+          {
+            "node": "Compute Dashboard Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Dashboard Metrics": {
+      "main": [
+        [
+          {
+            "node": "Append Dashboard Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize & Validate Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Merge Qualification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "errorWorkflow": "YOUR_ERROR_WORKFLOW_ID"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "tags": []
+}
